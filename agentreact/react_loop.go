@@ -43,7 +43,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 	}
 	toolDefinitions := indexToolDefinitions(input.Tools)
 
-	if err := transitionRunStatus(&state, agent.RunStatusRunning); err != nil {
+	if err := agent.TransitionRunStatus(&state, agent.RunStatusRunning); err != nil {
 		return state, err
 	}
 	for state.Step < maxSteps {
@@ -61,7 +61,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 			if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
 				return l.cancelRun(ctx, state, cancellationErr)
 			}
-			if transitionErr := transitionRunStatus(&state, agent.RunStatusFailed); transitionErr != nil {
+			if transitionErr := agent.TransitionRunStatus(&state, agent.RunStatusFailed); transitionErr != nil {
 				return state, errors.Join(err, transitionErr)
 			}
 			state.Error = err.Error()
@@ -85,7 +85,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 		})
 
 		if len(assistant.ToolCalls) == 0 {
-			if err := transitionRunStatus(&state, agent.RunStatusCompleted); err != nil {
+			if err := agent.TransitionRunStatus(&state, agent.RunStatusCompleted); err != nil {
 				return state, err
 			}
 			state.Output = assistant.Content
@@ -151,7 +151,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 		}
 	}
 
-	if err := transitionRunStatus(&state, agent.RunStatusMaxStepsExceeded); err != nil {
+	if err := agent.TransitionRunStatus(&state, agent.RunStatusMaxStepsExceeded); err != nil {
 		return state, errors.Join(agent.ErrMaxStepsExceeded, err)
 	}
 	state.Error = agent.ErrMaxStepsExceeded.Error()
@@ -200,7 +200,7 @@ func (l *ReactLoop) cancelRun(ctx context.Context, state agent.RunState, runErr 
 	if runErr == nil {
 		runErr = context.Canceled
 	}
-	if transitionErr := transitionRunStatus(&state, agent.RunStatusCancelled); transitionErr != nil {
+	if transitionErr := agent.TransitionRunStatus(&state, agent.RunStatusCancelled); transitionErr != nil {
 		return state, errors.Join(runErr, transitionErr)
 	}
 	state.Error = runErr.Error()

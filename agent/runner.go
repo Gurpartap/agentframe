@@ -112,7 +112,7 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 	state := RunState{
 		ID: runID,
 	}
-	if err := transitionRunStatus(&state, RunStatusPending); err != nil {
+	if err := TransitionRunStatus(&state, RunStatusPending); err != nil {
 		return RunResult{}, err
 	}
 	if input.SystemPrompt != "" {
@@ -226,7 +226,7 @@ func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResu
 	if isTerminalRunStatus(state.Status) {
 		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotCancellable, state.Status)
 	}
-	if err := transitionRunStatus(&state, RunStatusCancelled); err != nil {
+	if err := TransitionRunStatus(&state, RunStatusCancelled); err != nil {
 		return RunResult{State: state}, err
 	}
 	if err := r.store.Save(ctx, state); err != nil {

@@ -26,7 +26,8 @@ func validateRunStatusTransition(from, to RunStatus) error {
 	return nil
 }
 
-func transitionRunStatus(state *RunState, to RunStatus) error {
+// TransitionRunStatus validates and applies a run status transition.
+func TransitionRunStatus(state *RunState, to RunStatus) error {
 	if err := validateRunStatusTransition(state.Status, to); err != nil {
 		return err
 	}
