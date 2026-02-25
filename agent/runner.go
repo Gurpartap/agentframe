@@ -140,6 +140,9 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 			return RunResult{}, err
 		}
 		runID = generated
+		if runID == "" {
+			return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindStart)
+		}
 	}
 
 	state := RunState{
@@ -209,6 +212,9 @@ func (r *Runner) Continue(ctx context.Context, runID RunID, maxSteps int, tools 
 
 func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (RunResult, error) {
 	runID := cmd.RunID
+	if runID == "" {
+		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindContinue)
+	}
 	state, err := r.store.Load(ctx, runID)
 	if err != nil {
 		return RunResult{}, err
@@ -248,6 +254,9 @@ func (r *Runner) Cancel(ctx context.Context, runID RunID) (RunResult, error) {
 
 func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResult, error) {
 	runID := cmd.RunID
+	if runID == "" {
+		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindCancel)
+	}
 	state, err := r.store.Load(ctx, runID)
 	if err != nil {
 		return RunResult{}, err
@@ -288,6 +297,9 @@ func (r *Runner) Steer(ctx context.Context, runID RunID, instruction string) (Ru
 }
 
 func (r *Runner) dispatchSteer(ctx context.Context, cmd SteerCommand) (RunResult, error) {
+	if cmd.RunID == "" {
+		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindSteer)
+	}
 	state, err := r.store.Load(ctx, cmd.RunID)
 	if err != nil {
 		return RunResult{}, err
@@ -331,6 +343,9 @@ func (r *Runner) FollowUp(ctx context.Context, runID RunID, prompt string, maxSt
 }
 
 func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (RunResult, error) {
+	if cmd.RunID == "" {
+		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindFollowUp)
+	}
 	state, err := r.store.Load(ctx, cmd.RunID)
 	if err != nil {
 		return RunResult{}, err

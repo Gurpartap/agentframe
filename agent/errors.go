@@ -21,6 +21,8 @@ var (
 	ErrCommandInvalid = errors.New("command is invalid")
 	// ErrCommandUnsupported is returned when command kind has no runtime handler.
 	ErrCommandUnsupported = errors.New("command is unsupported")
+	// ErrInvalidRunID is returned when a runtime command is invoked with an empty or invalid run ID.
+	ErrInvalidRunID = errors.New("invalid run id")
 	// ErrEventPublish is returned when runtime event emission fails.
 	ErrEventPublish = errors.New("event publish failed")
 	// ErrMissingIDGenerator is returned when NewRunner is called without an ID generator dependency.

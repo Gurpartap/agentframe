@@ -163,3 +163,46 @@ func TestRunnerRun_PropagatesEngineError(t *testing.T) {
 		t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[2].CommandKind, agent.CommandKindStart)
 	}
 }
+
+func TestRunnerRun_RejectsEmptyGeneratedRunID(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
+	engine := &engineSpy{}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: emptyIDGenerator{},
+		RunStore:    store,
+		Engine:      engine,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		UserPrompt: "hello",
+		MaxSteps:   1,
+	})
+	if !errors.Is(runErr, agent.ErrInvalidRunID) {
+		t.Fatalf("expected ErrInvalidRunID, got: %v", runErr)
+	}
+	if !reflect.DeepEqual(result, agent.RunResult{}) {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if engine.calls != 0 {
+		t.Fatalf("engine should not execute on generated run id validation failure, calls=%d", engine.calls)
+	}
+	if gotEvents := events.Events(); len(gotEvents) != 0 {
+		t.Fatalf("unexpected events emitted: %d", len(gotEvents))
+	}
+	if _, loadErr := store.Load(context.Background(), ""); !errors.Is(loadErr, agent.ErrRunNotFound) {
+		t.Fatalf("expected ErrRunNotFound for empty run id persistence check, got %v", loadErr)
+	}
+}
+
+type emptyIDGenerator struct{}
+
+func (emptyIDGenerator) NewRunID(context.Context) (agent.RunID, error) {
+	return "", nil
+}

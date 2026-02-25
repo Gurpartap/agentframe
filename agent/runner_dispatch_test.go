@@ -350,6 +350,67 @@ func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
 	}
 }
 
+func TestRunnerDispatch_RejectsEmptyRunIDForNonStartCommands(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		cmd  agent.Command
+	}{
+		{
+			name: "continue",
+			cmd: agent.ContinueCommand{
+				RunID: "",
+			},
+		},
+		{
+			name: "cancel",
+			cmd: agent.CancelCommand{
+				RunID: "",
+			},
+		},
+		{
+			name: "steer",
+			cmd: agent.SteerCommand{
+				RunID:       "",
+				Instruction: "steer",
+			},
+		},
+		{
+			name: "follow_up",
+			cmd: agent.FollowUpCommand{
+				RunID:      "",
+				UserPrompt: "follow up",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			events := eventinginmem.New()
+			engine := &engineSpy{}
+			runner := newDispatchRunnerWithEngine(t, runstoreinmem.New(), events, engine)
+
+			result, err := runner.Dispatch(context.Background(), tc.cmd)
+			if !errors.Is(err, agent.ErrInvalidRunID) {
+				t.Fatalf("expected ErrInvalidRunID, got %v", err)
+			}
+			if !reflect.DeepEqual(result, agent.RunResult{}) {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+			if engine.calls != 0 {
+				t.Fatalf("engine should not execute on run id validation failure, calls=%d", engine.calls)
+			}
+			if gotEvents := events.Events(); len(gotEvents) != 0 {
+				t.Fatalf("unexpected events emitted: %d", len(gotEvents))
+			}
+		})
+	}
+}
+
 func TestRunnerSteer_AppendsTranscriptWithoutEngineExecution(t *testing.T) {
 	t.Parallel()
 
