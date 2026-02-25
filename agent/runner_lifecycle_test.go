@@ -8,7 +8,6 @@ import (
 
 	"agentruntime/agent"
 	"agentruntime/agent/internal/testkit"
-	"agentruntime/agentreact"
 )
 
 func TestRunnerCancel_NonTerminalStates(t *testing.T) {
@@ -332,7 +331,10 @@ func TestRunnerContinue_CancelledContext(t *testing.T) {
 func newLifecycleRunner(t *testing.T, store *testkit.RunStore, events *testkit.EventSink) *agent.Runner {
 	t.Helper()
 
-	model := testkit.NewScriptedModel(
+	return newDispatchRunner(
+		t,
+		store,
+		events,
 		testkit.Response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
@@ -340,19 +342,4 @@ func newLifecycleRunner(t *testing.T, store *testkit.RunStore, events *testkit.E
 			},
 		},
 	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{})
-	loop, err := agentreact.New(model, registry, events)
-	if err != nil {
-		t.Fatalf("new loop: %v", err)
-	}
-	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("life"),
-		RunStore:    store,
-		Engine:      loop,
-		EventSink:   events,
-	})
-	if err != nil {
-		t.Fatalf("new runner: %v", err)
-	}
-	return runner
 }

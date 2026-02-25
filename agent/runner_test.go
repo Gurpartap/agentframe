@@ -3,127 +3,125 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"agentruntime/agent"
 	"agentruntime/agent/internal/testkit"
-	"agentruntime/agentreact"
 )
 
-func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {
+func TestRunnerRun_PersistsAndCompletesWithEngine(t *testing.T) {
 	t.Parallel()
 
-	model := testkit.NewScriptedModel(
-		testkit.Response{
-			Message: agent.Message{
-				Role:    agent.RoleAssistant,
-				Content: "I should call a tool first.",
-				ToolCalls: []agent.ToolCall{
-					{
-						ID:   "call-1",
-						Name: "lookup",
-						Arguments: map[string]any{
-							"q": "Go",
-						},
-					},
-				},
-			},
-		},
-		testkit.Response{
-			Message: agent.Message{
-				Role:    agent.RoleAssistant,
-				Content: "Final answer after tool observation.",
-			},
-		},
-	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
-		"lookup": func(_ context.Context, args map[string]any) (string, error) {
-			return "tool_result_for=" + args["q"].(string), nil
-		},
-	})
+	store := testkit.NewRunStore()
 	events := testkit.NewEventSink()
-	loop, err := agentreact.New(model, registry, events)
-	if err != nil {
-		t.Fatalf("new loop: %v", err)
-	}
+	var gotState agent.RunState
+	var gotInput agent.EngineInput
+	engine := &engineSpy{
+		executeFn: func(_ context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
+			gotState = agent.CloneRunState(state)
+			gotInput = agent.EngineInput{MaxSteps: input.MaxSteps, Tools: append([]agent.ToolDefinition(nil), input.Tools...)}
 
-	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("test"),
-		RunStore:    testkit.NewRunStore(),
-		Engine:      loop,
-		EventSink:   events,
-	})
-	if err != nil {
-		t.Fatalf("new runner: %v", err)
+			next := state
+			next.Step = 1
+			next.Status = agent.RunStatusCompleted
+			next.Output = "done"
+			return next, nil
+		},
 	}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
 
 	result, err := runner.Run(context.Background(), agent.RunInput{
-		SystemPrompt: "Be concise.",
-		UserPrompt:   "Find info about Go.",
-		MaxSteps:     4,
+		SystemPrompt: "system",
+		UserPrompt:   "hello",
+		MaxSteps:     3,
 		Tools: []agent.ToolDefinition{
-			{Name: "lookup", Description: "Look up information"},
+			{Name: "lookup", Description: "Lookup information"},
 		},
 	})
 	if err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
+	if engine.calls != 1 {
+		t.Fatalf("unexpected engine call count: %d", engine.calls)
+	}
+	if gotState.Status != agent.RunStatusPending {
+		t.Fatalf("engine received unexpected status: %s", gotState.Status)
+	}
+	if gotState.Version != 1 {
+		t.Fatalf("engine received unexpected version: %d", gotState.Version)
+	}
+	if len(gotState.Messages) != 2 {
+		t.Fatalf("engine received unexpected message count: %d", len(gotState.Messages))
+	}
+	if gotState.Messages[0].Role != agent.RoleSystem || gotState.Messages[0].Content != "system" {
+		t.Fatalf("unexpected first message: %+v", gotState.Messages[0])
+	}
+	if gotState.Messages[1].Role != agent.RoleUser || gotState.Messages[1].Content != "hello" {
+		t.Fatalf("unexpected second message: %+v", gotState.Messages[1])
+	}
+	if gotInput.MaxSteps != 3 {
+		t.Fatalf("engine received unexpected max steps: %d", gotInput.MaxSteps)
+	}
+	if len(gotInput.Tools) != 1 || gotInput.Tools[0].Name != "lookup" {
+		t.Fatalf("engine received unexpected tools: %+v", gotInput.Tools)
+	}
 	if result.State.Status != agent.RunStatusCompleted {
 		t.Fatalf("unexpected status: %s", result.State.Status)
 	}
-	if result.State.Output != "Final answer after tool observation." {
+	if result.State.Output != "done" {
 		t.Fatalf("unexpected output: %q", result.State.Output)
 	}
 	if result.State.Version != 2 {
 		t.Fatalf("unexpected version: %d", result.State.Version)
 	}
-	if len(result.State.Messages) != 5 {
-		t.Fatalf("unexpected message count: %d", len(result.State.Messages))
+
+	loaded, err := store.Load(context.Background(), result.State.ID)
+	if err != nil {
+		t.Fatalf("load saved state: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, result.State) {
+		t.Fatalf("saved state mismatch")
+	}
+
+	gotEvents := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	if len(gotEvents) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(gotEvents), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if gotEvents[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, gotEvents[i].Type, wantTypes[i])
+		}
+	}
+	if gotEvents[2].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[2].CommandKind, agent.CommandKindStart)
 	}
 }
 
-func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
+func TestRunnerRun_PropagatesEngineError(t *testing.T) {
 	t.Parallel()
 
-	model := testkit.NewScriptedModel(
-		testkit.Response{
-			Message: agent.Message{
-				Role:    agent.RoleAssistant,
-				Content: "Need tool.",
-				ToolCalls: []agent.ToolCall{
-					{
-						ID:   "call-1",
-						Name: "lookup",
-					},
-				},
-			},
+	store := testkit.NewRunStore()
+	events := testkit.NewEventSink()
+	engine := &engineSpy{
+		executeFn: func(_ context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
+			next := state
+			next.Step = 1
+			next.Status = agent.RunStatusMaxStepsExceeded
+			next.Error = agent.ErrMaxStepsExceeded.Error()
+			return next, agent.ErrMaxStepsExceeded
 		},
-	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
-		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
-			return "value", nil
-		},
-	})
-	loop, err := agentreact.New(model, registry, testkit.NewEventSink())
-	if err != nil {
-		t.Fatalf("new loop: %v", err)
 	}
-	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("test"),
-		RunStore:    testkit.NewRunStore(),
-		Engine:      loop,
-		EventSink:   testkit.NewEventSink(),
-	})
-	if err != nil {
-		t.Fatalf("new runner: %v", err)
-	}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
 
 	result, err := runner.Run(context.Background(), agent.RunInput{
-		UserPrompt: "Do a tool thing.",
+		UserPrompt: "do work",
 		MaxSteps:   1,
-		Tools: []agent.ToolDefinition{
-			{Name: "lookup"},
-		},
 	})
 	if !errors.Is(err, agent.ErrMaxStepsExceeded) {
 		t.Fatalf("expected ErrMaxStepsExceeded, got: %v", err)
@@ -133,5 +131,34 @@ func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 	}
 	if result.State.Version != 2 {
 		t.Fatalf("unexpected version: %d", result.State.Version)
+	}
+	if result.State.Error != agent.ErrMaxStepsExceeded.Error() {
+		t.Fatalf("unexpected error text: %q", result.State.Error)
+	}
+
+	loaded, loadErr := store.Load(context.Background(), result.State.ID)
+	if loadErr != nil {
+		t.Fatalf("load saved state: %v", loadErr)
+	}
+	if !reflect.DeepEqual(loaded, result.State) {
+		t.Fatalf("saved state mismatch")
+	}
+
+	gotEvents := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	if len(gotEvents) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(gotEvents), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if gotEvents[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, gotEvents[i].Type, wantTypes[i])
+		}
+	}
+	if gotEvents[2].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[2].CommandKind, agent.CommandKindStart)
 	}
 }

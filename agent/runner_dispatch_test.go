@@ -3,12 +3,12 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
 	"agentruntime/agent"
 	"agentruntime/agent/internal/testkit"
-	"agentruntime/agentreact"
 )
 
 func TestRunnerDispatch_StartWrapperParity(t *testing.T) {
@@ -681,22 +681,11 @@ func newDispatchRunner(
 ) *agent.Runner {
 	t.Helper()
 
-	model := testkit.NewScriptedModel(responses...)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{})
-	loop, err := agentreact.New(model, registry, events)
-	if err != nil {
-		t.Fatalf("new loop: %v", err)
+	engine := &scriptedEngine{
+		events:    events,
+		responses: append([]testkit.Response(nil), responses...),
 	}
-	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("dispatch"),
-		RunStore:    store,
-		Engine:      loop,
-		EventSink:   events,
-	})
-	if err != nil {
-		t.Fatalf("new runner: %v", err)
-	}
-	return runner
+	return newDispatchRunnerWithEngine(t, store, events, engine)
 }
 
 type engineSpy struct {
@@ -756,4 +745,69 @@ func assertCommandKind(t *testing.T, events []agent.Event, want agent.CommandKin
 	if last.CommandKind != want {
 		t.Fatalf("unexpected command kind: got=%s want=%s", last.CommandKind, want)
 	}
+}
+
+type scriptedEngine struct {
+	index     int
+	events    agent.EventSink
+	responses []testkit.Response
+}
+
+func (s *scriptedEngine) Execute(ctx context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		next := state
+		if transitionErr := agent.TransitionRunStatus(&next, agent.RunStatusCancelled); transitionErr != nil {
+			return state, errors.Join(ctxErr, transitionErr)
+		}
+		next.Error = ctxErr.Error()
+		_ = s.events.Publish(ctx, agent.Event{
+			RunID:       next.ID,
+			Step:        next.Step,
+			Type:        agent.EventTypeRunCancelled,
+			Description: ctxErr.Error(),
+		})
+		return next, ctxErr
+	}
+
+	if s.index >= len(s.responses) {
+		return state, fmt.Errorf("script exhausted at step %d", s.index+1)
+	}
+	current := s.responses[s.index]
+	s.index++
+	if current.Err != nil {
+		return state, current.Err
+	}
+
+	next := state
+	if err := agent.TransitionRunStatus(&next, agent.RunStatusRunning); err != nil {
+		return next, err
+	}
+	next.Step++
+
+	message := agent.CloneMessage(current.Message)
+	if message.Role == "" {
+		message.Role = agent.RoleAssistant
+	}
+	next.Messages = append(next.Messages, message)
+	_ = s.events.Publish(ctx, agent.Event{
+		RunID:   next.ID,
+		Step:    next.Step,
+		Type:    agent.EventTypeAssistantMessage,
+		Message: &message,
+	})
+
+	if len(message.ToolCalls) == 0 {
+		if err := agent.TransitionRunStatus(&next, agent.RunStatusCompleted); err != nil {
+			return next, err
+		}
+		next.Output = message.Content
+		_ = s.events.Publish(ctx, agent.Event{
+			RunID:       next.ID,
+			Step:        next.Step,
+			Type:        agent.EventTypeRunCompleted,
+			Description: "assistant returned a final answer",
+		})
+	}
+
+	return next, nil
 }

@@ -1,4 +1,4 @@
-package agent_test
+package agentreact_test
 
 import (
 	"context"
@@ -7,15 +7,14 @@ import (
 	"testing"
 
 	"agentruntime/agent"
-	"agentruntime/agent/internal/testkit"
 	"agentruntime/agentreact"
 )
 
 func TestConformance_EventOrdering(t *testing.T) {
 	t.Parallel()
 
-	model := testkit.NewScriptedModel(
-		testkit.Response{
+	model := newScriptedModel(
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "I need to use a tool.",
@@ -30,26 +29,26 @@ func TestConformance_EventOrdering(t *testing.T) {
 				},
 			},
 		},
-		testkit.Response{
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Final answer.",
 			},
 		},
 	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
+	registry := newRegistry(map[string]handler{
 		"lookup": func(_ context.Context, args map[string]any) (string, error) {
 			return "value_for=" + args["q"].(string), nil
 		},
 	})
-	events := testkit.NewEventSink()
+	events := newEventSink()
 	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("evt"),
-		RunStore:    testkit.NewRunStore(),
+		IDGenerator: newCounterIDGenerator("evt"),
+		RunStore:    newRunStore(),
 		Engine:      loop,
 		EventSink:   events,
 	})
@@ -110,8 +109,8 @@ func TestConformance_EventOrdering(t *testing.T) {
 func TestConformance_TranscriptToolCallResultLinkage(t *testing.T) {
 	t.Parallel()
 
-	model := testkit.NewScriptedModel(
-		testkit.Response{
+	model := newScriptedModel(
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "I need two tools.",
@@ -133,14 +132,14 @@ func TestConformance_TranscriptToolCallResultLinkage(t *testing.T) {
 				},
 			},
 		},
-		testkit.Response{
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Final answer after both tools.",
 			},
 		},
 	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
+	registry := newRegistry(map[string]handler{
 		"lookup": func(_ context.Context, args map[string]any) (string, error) {
 			return "lookup=" + args["q"].(string), nil
 		},
@@ -148,15 +147,15 @@ func TestConformance_TranscriptToolCallResultLinkage(t *testing.T) {
 			return "summary=" + args["text"].(string), nil
 		},
 	})
-	loop, err := agentreact.New(model, registry, testkit.NewEventSink())
+	loop, err := agentreact.New(model, registry, newEventSink())
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("link"),
-		RunStore:    testkit.NewRunStore(),
+		IDGenerator: newCounterIDGenerator("link"),
+		RunStore:    newRunStore(),
 		Engine:      loop,
-		EventSink:   testkit.NewEventSink(),
+		EventSink:   newEventSink(),
 	})
 	if err != nil {
 		t.Fatalf("new runner: %v", err)
@@ -217,8 +216,8 @@ func TestConformance_TranscriptToolCallResultLinkage(t *testing.T) {
 func TestConformance_ContinueDeterministicProgression(t *testing.T) {
 	t.Parallel()
 
-	model := testkit.NewScriptedModel(
-		testkit.Response{
+	model := newScriptedModel(
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Need tool first.",
@@ -230,28 +229,28 @@ func TestConformance_ContinueDeterministicProgression(t *testing.T) {
 				},
 			},
 		},
-		testkit.Response{
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Final answer after continue.",
 			},
 		},
 	)
-	store := testkit.NewRunStore()
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
+	store := newRunStore()
+	registry := newRegistry(map[string]handler{
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			return "tool-value", nil
 		},
 	})
-	loop, err := agentreact.New(model, registry, testkit.NewEventSink())
+	loop, err := agentreact.New(model, registry, newEventSink())
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("continue"),
+		IDGenerator: newCounterIDGenerator("continue"),
 		RunStore:    store,
 		Engine:      loop,
-		EventSink:   testkit.NewEventSink(),
+		EventSink:   newEventSink(),
 	})
 	if err != nil {
 		t.Fatalf("new runner: %v", err)
@@ -324,7 +323,7 @@ func TestConformance_CommandAppliedContinueOrdering(t *testing.T) {
 	t.Parallel()
 
 	runID := agent.RunID("conformance-continue-command")
-	store := testkit.NewRunStore()
+	store := newRunStore()
 	initial := agent.RunState{
 		ID:     runID,
 		Status: agent.RunStatusPending,
@@ -336,20 +335,20 @@ func TestConformance_CommandAppliedContinueOrdering(t *testing.T) {
 		t.Fatalf("save initial state: %v", err)
 	}
 
-	events := testkit.NewEventSink()
-	model := testkit.NewScriptedModel(testkit.Response{
+	events := newEventSink()
+	model := newScriptedModel(response{
 		Message: agent.Message{
 			Role:    agent.RoleAssistant,
 			Content: "continued",
 		},
 	})
-	registry := testkit.NewRegistry(map[string]testkit.Handler{})
+	registry := newRegistry(map[string]handler{})
 	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("continue-order"),
+		IDGenerator: newCounterIDGenerator("continue-order"),
 		RunStore:    store,
 		Engine:      loop,
 		EventSink:   events,
@@ -394,7 +393,7 @@ func TestConformance_CommandAppliedCancelOrdering(t *testing.T) {
 	t.Parallel()
 
 	runID := agent.RunID("conformance-cancel-command")
-	store := testkit.NewRunStore()
+	store := newRunStore()
 	initial := agent.RunState{
 		ID:     runID,
 		Status: agent.RunStatusRunning,
@@ -404,20 +403,20 @@ func TestConformance_CommandAppliedCancelOrdering(t *testing.T) {
 		t.Fatalf("save initial state: %v", err)
 	}
 
-	events := testkit.NewEventSink()
-	model := testkit.NewScriptedModel(testkit.Response{
+	events := newEventSink()
+	model := newScriptedModel(response{
 		Message: agent.Message{
 			Role:    agent.RoleAssistant,
 			Content: "unused",
 		},
 	})
-	registry := testkit.NewRegistry(map[string]testkit.Handler{})
+	registry := newRegistry(map[string]handler{})
 	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("cancel-order"),
+		IDGenerator: newCounterIDGenerator("cancel-order"),
 		RunStore:    store,
 		Engine:      loop,
 		EventSink:   events,

@@ -1,4 +1,4 @@
-package agent_test
+package agentreact_test
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"agentruntime/agent"
-	"agentruntime/agent/internal/testkit"
 	"agentruntime/agentreact"
 )
 
@@ -16,8 +15,8 @@ func TestToolFailure_UnknownTool(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	model := testkit.NewScriptedModel(
-		testkit.Response{
+	model := newScriptedModel(
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Trying unknown tool.",
@@ -26,11 +25,11 @@ func TestToolFailure_UnknownTool(t *testing.T) {
 				},
 			},
 		},
-		testkit.Response{
+		response{
 			Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
 		},
 	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
+	registry := newRegistry(map[string]handler{
 		"ghost": func(_ context.Context, _ map[string]any) (string, error) {
 			calls.Add(1)
 			return "should not run", nil
@@ -62,8 +61,8 @@ func TestToolFailure_InvalidArguments_NoExecutorCall(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	model := testkit.NewScriptedModel(
-		testkit.Response{
+	model := newScriptedModel(
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Calling tool with invalid args.",
@@ -78,11 +77,11 @@ func TestToolFailure_InvalidArguments_NoExecutorCall(t *testing.T) {
 				},
 			},
 		},
-		testkit.Response{
+		response{
 			Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
 		},
 	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
+	registry := newRegistry(map[string]handler{
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			calls.Add(1)
 			return "should not run", nil
@@ -126,8 +125,8 @@ func TestToolFailure_ExecutorError(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	model := testkit.NewScriptedModel(
-		testkit.Response{
+	model := newScriptedModel(
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Calling tool.",
@@ -142,11 +141,11 @@ func TestToolFailure_ExecutorError(t *testing.T) {
 				},
 			},
 		},
-		testkit.Response{
+		response{
 			Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
 		},
 	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
+	registry := newRegistry(map[string]handler{
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			calls.Add(1)
 			return "", errors.New("backend timeout")
@@ -190,8 +189,8 @@ func TestToolFailure_ValidArgumentsUnchangedPath(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	model := testkit.NewScriptedModel(
-		testkit.Response{
+	model := newScriptedModel(
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Calling tool.",
@@ -206,11 +205,11 @@ func TestToolFailure_ValidArgumentsUnchangedPath(t *testing.T) {
 				},
 			},
 		},
-		testkit.Response{
+		response{
 			Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
 		},
 	)
-	registry := testkit.NewRegistry(map[string]testkit.Handler{
+	registry := newRegistry(map[string]handler{
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			calls.Add(1)
 			return "tool-value", nil
@@ -252,20 +251,20 @@ func TestToolFailure_ValidArgumentsUnchangedPath(t *testing.T) {
 
 func runToolTest(
 	t *testing.T,
-	model *testkit.ScriptedModel,
-	registry *testkit.Registry,
+	model *scriptedModel,
+	registry *registry,
 	tools []agent.ToolDefinition,
-) (agent.RunResult, *testkit.EventSink) {
+) (agent.RunResult, *eventSink) {
 	t.Helper()
 
-	events := testkit.NewEventSink()
+	events := newEventSink()
 	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("tool"),
-		RunStore:    testkit.NewRunStore(),
+		IDGenerator: newCounterIDGenerator("tool"),
+		RunStore:    newRunStore(),
 		Engine:      loop,
 		EventSink:   events,
 	})
