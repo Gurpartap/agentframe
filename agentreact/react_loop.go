@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 
 	"agentruntime/agent"
 )
@@ -191,10 +190,31 @@ func cloneToolDefinitions(in []agent.ToolDefinition) []agent.ToolDefinition {
 		out[i] = in[i]
 		if in[i].InputSchema != nil {
 			out[i].InputSchema = make(map[string]any, len(in[i].InputSchema))
-			maps.Copy(out[i].InputSchema, in[i].InputSchema)
+			for key, value := range in[i].InputSchema {
+				out[i].InputSchema[key] = cloneSchemaValue(value)
+			}
 		}
 	}
 	return out
+}
+
+func cloneSchemaValue(in any) any {
+	switch typed := in.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, value := range typed {
+			out[key] = cloneSchemaValue(value)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i := range typed {
+			out[i] = cloneSchemaValue(typed[i])
+		}
+		return out
+	default:
+		return in
+	}
 }
 
 type noopEventSink struct{}

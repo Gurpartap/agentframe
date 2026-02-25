@@ -1,7 +1,5 @@
 package agent
 
-import "maps"
-
 // ToolDefinition declares a callable capability exposed to the model.
 type ToolDefinition struct {
 	Name        string         `json:"name"`
@@ -49,7 +47,28 @@ func CloneToolCall(in ToolCall) ToolCall {
 	out := in
 	if in.Arguments != nil {
 		out.Arguments = make(map[string]any, len(in.Arguments))
-		maps.Copy(out.Arguments, in.Arguments)
+		for key, value := range in.Arguments {
+			out.Arguments[key] = cloneJSONLikeValue(value)
+		}
 	}
 	return out
+}
+
+func cloneJSONLikeValue(in any) any {
+	switch typed := in.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, value := range typed {
+			out[key] = cloneJSONLikeValue(value)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i := range typed {
+			out[i] = cloneJSONLikeValue(typed[i])
+		}
+		return out
+	default:
+		return in
+	}
 }
