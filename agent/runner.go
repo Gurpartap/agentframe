@@ -79,6 +79,9 @@ func sideEffectContext(ctx context.Context) context.Context {
 
 // Dispatch executes a typed command against the run store.
 func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
+	if ctx == nil {
+		return RunResult{}, ErrContextNil
+	}
 	if isNilCommand(cmd) {
 		return RunResult{}, ErrCommandNil
 	}

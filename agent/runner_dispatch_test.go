@@ -289,12 +289,39 @@ func TestRunnerDispatch_FollowUpWrapperParity(t *testing.T) {
 	assertCommandKind(t, dispatchEvents.Events(), agent.CommandKindFollowUp)
 }
 
-func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
+func TestRunnerDispatch_InvalidInputMatrix(t *testing.T) {
 	t.Parallel()
 
-	runner := newDispatchRunner(t, runstoreinmem.New(), eventinginmem.New(), response{
-		Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
-	})
+	const (
+		existingRunID = agent.RunID("dispatch-invalid-input-existing-run")
+		startRunID    = agent.RunID("dispatch-invalid-input-start-run")
+	)
+	seedState := agent.RunState{
+		ID:     existingRunID,
+		Status: agent.RunStatusPending,
+		Step:   2,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "seed"},
+		},
+	}
+
+	newFixture := func(t *testing.T) (*agent.Runner, *runstoreinmem.Store, *eventinginmem.Sink, *engineSpy, agent.RunState) {
+		t.Helper()
+
+		store := runstoreinmem.New()
+		if err := store.Save(context.Background(), seedState); err != nil {
+			t.Fatalf("seed store: %v", err)
+		}
+		persistedSeed, err := store.Load(context.Background(), existingRunID)
+		if err != nil {
+			t.Fatalf("load seeded state: %v", err)
+		}
+
+		events := eventinginmem.New()
+		engine := &engineSpy{}
+		runner := newDispatchRunnerWithEngine(t, store, events, engine)
+		return runner, store, events, engine, persistedSeed
+	}
 
 	var nilCommand agent.Command
 	var nilStart *agent.StartCommand
@@ -303,84 +330,206 @@ func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
 	var nilSteer *agent.SteerCommand
 	var nilFollowUp *agent.FollowUpCommand
 	var nilUnknown *unknownCommand
-	nilCases := []struct {
-		name string
-		cmd  agent.Command
-	}{
-		{name: "nil", cmd: nilCommand},
-		{name: "nil_start", cmd: nilStart},
-		{name: "nil_continue", cmd: nilContinue},
-		{name: "nil_cancel", cmd: nilCancel},
-		{name: "nil_steer", cmd: nilSteer},
-		{name: "nil_follow_up", cmd: nilFollowUp},
-		{name: "nil_unknown", cmd: nilUnknown},
-	}
-	for _, tc := range nilCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if _, err := runner.Dispatch(context.Background(), tc.cmd); !errors.Is(err, agent.ErrCommandNil) {
-				t.Fatalf("expected ErrCommandNil, got %v", err)
-			}
-		})
+
+	type matrixCase struct {
+		name        string
+		wantErr     error
+		call        func(*agent.Runner) (agent.RunResult, error)
+		checkAbsent agent.RunID
 	}
 
-	if _, err := runner.Dispatch(context.Background(), unknownCommand{}); !errors.Is(err, agent.ErrCommandUnsupported) {
-		t.Fatalf("expected ErrCommandUnsupported, got %v", err)
-	}
-
-	invalidCases := []struct {
-		name string
-		cmd  agent.Command
-	}{
-		{name: "invalid_start", cmd: invalidStartCommand{}},
-		{name: "invalid_continue", cmd: invalidContinueCommand{}},
-		{name: "invalid_cancel", cmd: invalidCancelCommand{}},
-		{name: "invalid_steer", cmd: invalidSteerCommand{}},
-		{name: "invalid_follow_up", cmd: invalidFollowUpCommand{}},
-	}
-	for _, tc := range invalidCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if _, err := runner.Dispatch(context.Background(), tc.cmd); !errors.Is(err, agent.ErrCommandInvalid) {
-				t.Fatalf("expected ErrCommandInvalid, got %v", err)
-			}
-		})
-	}
-}
-
-func TestRunnerDispatch_RejectsEmptyRunIDForNonStartCommands(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		cmd  agent.Command
-	}{
+	cases := []matrixCase{
 		{
-			name: "continue",
-			cmd: agent.ContinueCommand{
-				RunID: "",
+			name:    "nil_context_wrapper_start",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Run(nil, agent.RunInput{RunID: startRunID, UserPrompt: "hello", MaxSteps: 3})
+			},
+			checkAbsent: startRunID,
+		},
+		{
+			name:    "nil_context_wrapper_continue",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Continue(nil, existingRunID, 3, nil)
 			},
 		},
 		{
-			name: "cancel",
-			cmd: agent.CancelCommand{
-				RunID: "",
+			name:    "nil_context_wrapper_cancel",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Cancel(nil, existingRunID)
 			},
 		},
 		{
-			name: "steer",
-			cmd: agent.SteerCommand{
-				RunID:       "",
-				Instruction: "steer",
+			name:    "nil_context_wrapper_steer",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Steer(nil, existingRunID, "new direction")
 			},
 		},
 		{
-			name: "follow_up",
-			cmd: agent.FollowUpCommand{
-				RunID:      "",
-				UserPrompt: "follow up",
+			name:    "nil_context_wrapper_follow_up",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.FollowUp(nil, existingRunID, "follow up", 3, nil)
+			},
+		},
+		{
+			name:    "nil_context_dispatch_start",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(nil, agent.StartCommand{
+					Input: agent.RunInput{RunID: startRunID, UserPrompt: "hello", MaxSteps: 3},
+				})
+			},
+			checkAbsent: startRunID,
+		},
+		{
+			name:    "nil_context_dispatch_continue",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(nil, agent.ContinueCommand{RunID: existingRunID, MaxSteps: 3})
+			},
+		},
+		{
+			name:    "nil_context_dispatch_cancel",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(nil, agent.CancelCommand{RunID: existingRunID})
+			},
+		},
+		{
+			name:    "nil_context_dispatch_steer",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(nil, agent.SteerCommand{RunID: existingRunID, Instruction: "steer"})
+			},
+		},
+		{
+			name:    "nil_context_dispatch_follow_up",
+			wantErr: agent.ErrContextNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(nil, agent.FollowUpCommand{RunID: existingRunID, UserPrompt: "follow up", MaxSteps: 3})
+			},
+		},
+		{
+			name:    "nil_command",
+			wantErr: agent.ErrCommandNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), nilCommand)
+			},
+		},
+		{
+			name:    "nil_start_command",
+			wantErr: agent.ErrCommandNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), nilStart)
+			},
+		},
+		{
+			name:    "nil_continue_command",
+			wantErr: agent.ErrCommandNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), nilContinue)
+			},
+		},
+		{
+			name:    "nil_cancel_command",
+			wantErr: agent.ErrCommandNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), nilCancel)
+			},
+		},
+		{
+			name:    "nil_steer_command",
+			wantErr: agent.ErrCommandNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), nilSteer)
+			},
+		},
+		{
+			name:    "nil_follow_up_command",
+			wantErr: agent.ErrCommandNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), nilFollowUp)
+			},
+		},
+		{
+			name:    "nil_unknown_command",
+			wantErr: agent.ErrCommandNil,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), nilUnknown)
+			},
+		},
+		{
+			name:    "unsupported_command",
+			wantErr: agent.ErrCommandUnsupported,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), unknownCommand{})
+			},
+		},
+		{
+			name:    "invalid_start_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), invalidStartCommand{})
+			},
+		},
+		{
+			name:    "invalid_continue_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), invalidContinueCommand{})
+			},
+		},
+		{
+			name:    "invalid_cancel_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), invalidCancelCommand{})
+			},
+		},
+		{
+			name:    "invalid_steer_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), invalidSteerCommand{})
+			},
+		},
+		{
+			name:    "invalid_follow_up_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), invalidFollowUpCommand{})
+			},
+		},
+		{
+			name:    "empty_run_id_continue",
+			wantErr: agent.ErrInvalidRunID,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.ContinueCommand{RunID: "", MaxSteps: 3})
+			},
+		},
+		{
+			name:    "empty_run_id_cancel",
+			wantErr: agent.ErrInvalidRunID,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.CancelCommand{RunID: ""})
+			},
+		},
+		{
+			name:    "empty_run_id_steer",
+			wantErr: agent.ErrInvalidRunID,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.SteerCommand{RunID: "", Instruction: "steer"})
+			},
+		},
+		{
+			name:    "empty_run_id_follow_up",
+			wantErr: agent.ErrInvalidRunID,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.FollowUpCommand{RunID: "", UserPrompt: "follow up", MaxSteps: 3})
 			},
 		},
 	}
@@ -390,22 +539,33 @@ func TestRunnerDispatch_RejectsEmptyRunIDForNonStartCommands(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			events := eventinginmem.New()
-			engine := &engineSpy{}
-			runner := newDispatchRunnerWithEngine(t, runstoreinmem.New(), events, engine)
-
-			result, err := runner.Dispatch(context.Background(), tc.cmd)
-			if !errors.Is(err, agent.ErrInvalidRunID) {
-				t.Fatalf("expected ErrInvalidRunID, got %v", err)
+			runner, store, events, engine, persistedSeed := newFixture(t)
+			result, err := tc.call(runner)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("expected %v, got %v", tc.wantErr, err)
 			}
 			if !reflect.DeepEqual(result, agent.RunResult{}) {
 				t.Fatalf("unexpected result: %+v", result)
 			}
 			if engine.calls != 0 {
-				t.Fatalf("engine should not execute on run id validation failure, calls=%d", engine.calls)
+				t.Fatalf("engine should not execute for rejected input, calls=%d", engine.calls)
 			}
 			if gotEvents := events.Events(); len(gotEvents) != 0 {
 				t.Fatalf("unexpected events emitted: %d", len(gotEvents))
+			}
+
+			loaded, loadErr := store.Load(context.Background(), existingRunID)
+			if loadErr != nil {
+				t.Fatalf("load seeded state: %v", loadErr)
+			}
+			if !reflect.DeepEqual(loaded, persistedSeed) {
+				t.Fatalf("persisted state mutated: got=%+v want=%+v", loaded, persistedSeed)
+			}
+
+			if tc.checkAbsent != "" {
+				if _, loadErr := store.Load(context.Background(), tc.checkAbsent); !errors.Is(loadErr, agent.ErrRunNotFound) {
+					t.Fatalf("expected ErrRunNotFound for %q, got %v", tc.checkAbsent, loadErr)
+				}
 			}
 		})
 	}

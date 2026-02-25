@@ -17,6 +17,8 @@ var (
 	ErrRunNotCancellable = errors.New("run is not cancellable")
 	// ErrCommandNil is returned when dispatch is called with a nil command.
 	ErrCommandNil = errors.New("command is nil")
+	// ErrContextNil is returned when runtime commands are invoked with a nil context.
+	ErrContextNil = errors.New("context is nil")
 	// ErrCommandInvalid is returned when command kind and payload type are inconsistent.
 	ErrCommandInvalid = errors.New("command is invalid")
 	// ErrCommandUnsupported is returned when command kind has no runtime handler.
