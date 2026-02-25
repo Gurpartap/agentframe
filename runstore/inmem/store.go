@@ -2,6 +2,7 @@ package inmem
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -23,6 +24,9 @@ func New() *Store {
 func (s *Store) Save(ctx context.Context, state agent.RunState) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
+	}
+	if state.ID == "" {
+		return fmt.Errorf("%w: save state with empty id", agent.ErrInvalidRunID)
 	}
 
 	s.mu.Lock()
@@ -62,6 +66,12 @@ func (s *Store) Save(ctx context.Context, state agent.RunState) error {
 func (s *Store) Load(ctx context.Context, runID agent.RunID) (agent.RunState, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return agent.RunState{}, ctxErr
+	}
+	if runID == "" {
+		return agent.RunState{}, errors.Join(
+			fmt.Errorf("%w: load with empty id", agent.ErrInvalidRunID),
+			agent.ErrRunNotFound,
+		)
 	}
 
 	s.mu.RLock()

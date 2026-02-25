@@ -63,6 +63,28 @@ func TestStore_SaveVersioningAndConflict(t *testing.T) {
 	}
 }
 
+func TestStore_SaveRejectsEmptyRunID(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	err := store.Save(context.Background(), agent.RunState{
+		Status: agent.RunStatusPending,
+	})
+	if !errors.Is(err, agent.ErrInvalidRunID) {
+		t.Fatalf("expected ErrInvalidRunID, got %v", err)
+	}
+}
+
+func TestStore_LoadRejectsEmptyRunID(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	_, err := store.Load(context.Background(), "")
+	if !errors.Is(err, agent.ErrInvalidRunID) {
+		t.Fatalf("expected ErrInvalidRunID, got %v", err)
+	}
+}
+
 func TestStore_SaveFailsFastOnDoneContext(t *testing.T) {
 	t.Parallel()
 
