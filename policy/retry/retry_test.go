@@ -7,11 +7,12 @@ import (
 	"testing"
 
 	"agentruntime/agent"
+	"agentruntime/agentreact"
 )
 
-type modelFunc func(context.Context, agent.ModelRequest) (agent.Message, error)
+type modelFunc func(context.Context, agentreact.ModelRequest) (agent.Message, error)
 
-func (f modelFunc) Generate(ctx context.Context, request agent.ModelRequest) (agent.Message, error) {
+func (f modelFunc) Generate(ctx context.Context, request agentreact.ModelRequest) (agent.Message, error) {
 	return f(ctx, request)
 }
 
@@ -25,7 +26,7 @@ func TestWrapModel_FailTwiceThenSucceed(t *testing.T) {
 	t.Parallel()
 
 	attempts := 0
-	model := modelFunc(func(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
+	model := modelFunc(func(_ context.Context, _ agentreact.ModelRequest) (agent.Message, error) {
 		attempts++
 		if attempts < 3 {
 			return agent.Message{}, fmt.Errorf("attempt %d failed", attempts)
@@ -34,7 +35,7 @@ func TestWrapModel_FailTwiceThenSucceed(t *testing.T) {
 	})
 
 	wrapped := WrapModel(model, Config{MaxAttempts: 3})
-	msg, err := wrapped.Generate(context.Background(), agent.ModelRequest{})
+	msg, err := wrapped.Generate(context.Background(), agentreact.ModelRequest{})
 	if err != nil {
 		t.Fatalf("generate returned error: %v", err)
 	}
@@ -51,14 +52,14 @@ func TestWrapModel_AlwaysFailReturnsLastError(t *testing.T) {
 
 	attempts := 0
 	var lastErr error
-	model := modelFunc(func(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
+	model := modelFunc(func(_ context.Context, _ agentreact.ModelRequest) (agent.Message, error) {
 		attempts++
 		lastErr = fmt.Errorf("attempt %d failed", attempts)
 		return agent.Message{}, lastErr
 	})
 
 	wrapped := WrapModel(model, Config{MaxAttempts: 3})
-	_, err := wrapped.Generate(context.Background(), agent.ModelRequest{})
+	_, err := wrapped.Generate(context.Background(), agentreact.ModelRequest{})
 	if !errors.Is(err, lastErr) {
 		t.Fatalf("expected last error %v, got %v", lastErr, err)
 	}
@@ -121,7 +122,7 @@ func TestWrapModel_ShouldRetryFalseStopsAfterFirstError(t *testing.T) {
 	t.Parallel()
 
 	attempts := 0
-	model := modelFunc(func(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
+	model := modelFunc(func(_ context.Context, _ agentreact.ModelRequest) (agent.Message, error) {
 		attempts++
 		return agent.Message{}, errors.New("retryable")
 	})
@@ -132,7 +133,7 @@ func TestWrapModel_ShouldRetryFalseStopsAfterFirstError(t *testing.T) {
 			return false
 		},
 	})
-	_, err := wrapped.Generate(context.Background(), agent.ModelRequest{})
+	_, err := wrapped.Generate(context.Background(), agentreact.ModelRequest{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -182,13 +183,13 @@ func TestWrapModel_ContextErrorsDoNotRetryByDefault(t *testing.T) {
 			t.Parallel()
 
 			attempts := 0
-			model := modelFunc(func(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
+			model := modelFunc(func(_ context.Context, _ agentreact.ModelRequest) (agent.Message, error) {
 				attempts++
 				return agent.Message{}, tc.err
 			})
 			wrapped := WrapModel(model, Config{MaxAttempts: 5})
 
-			_, err := wrapped.Generate(context.Background(), agent.ModelRequest{})
+			_, err := wrapped.Generate(context.Background(), agentreact.ModelRequest{})
 			if !errors.Is(err, tc.err) {
 				t.Fatalf("expected %v, got %v", tc.err, err)
 			}
@@ -237,7 +238,7 @@ func TestWrapModel_ContextDoneStopsWithoutAttempt(t *testing.T) {
 	t.Parallel()
 
 	attempts := 0
-	model := modelFunc(func(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
+	model := modelFunc(func(_ context.Context, _ agentreact.ModelRequest) (agent.Message, error) {
 		attempts++
 		return agent.Message{}, errors.New("unexpected call")
 	})
@@ -246,7 +247,7 @@ func TestWrapModel_ContextDoneStopsWithoutAttempt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := wrapped.Generate(ctx, agent.ModelRequest{})
+	_, err := wrapped.Generate(ctx, agentreact.ModelRequest{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}

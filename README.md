@@ -24,8 +24,8 @@ import (
 	"agentruntime/agentreact"
 )
 
-model := /* your agent.Model implementation */
-tools := /* your agent.ToolExecutor implementation */
+model := /* your agentreact.Model implementation */
+tools := /* your agentreact.ToolExecutor implementation */
 events := /* your agent.EventSink implementation */
 engine, _ := agentreact.New(model, tools, events)
 

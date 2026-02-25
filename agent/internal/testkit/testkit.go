@@ -3,7 +3,6 @@ package testkit
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sync"
 	"sync/atomic"
 
@@ -14,81 +13,6 @@ import (
 type Response struct {
 	Message agent.Message
 	Err     error
-}
-
-// ScriptedModel is a deterministic model adapter for runtime tests.
-type ScriptedModel struct {
-	mu        sync.Mutex
-	index     int
-	responses []Response
-}
-
-func NewScriptedModel(responses ...Response) *ScriptedModel {
-	cloned := make([]Response, len(responses))
-	copy(cloned, responses)
-	return &ScriptedModel{
-		responses: cloned,
-	}
-}
-
-var _ agent.Model = (*ScriptedModel)(nil)
-
-func (m *ScriptedModel) Generate(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.index >= len(m.responses) {
-		return agent.Message{}, fmt.Errorf("script exhausted at step %d", m.index+1)
-	}
-	current := m.responses[m.index]
-	m.index++
-	if current.Err != nil {
-		return agent.Message{}, current.Err
-	}
-	msg := agent.CloneMessage(current.Message)
-	if msg.Role == "" {
-		msg.Role = agent.RoleAssistant
-	}
-	return msg, nil
-}
-
-// Handler executes business logic for one tool call.
-type Handler func(ctx context.Context, arguments map[string]any) (string, error)
-
-// Registry is a minimal map-backed tool executor.
-type Registry struct {
-	mu       sync.RWMutex
-	handlers map[string]Handler
-}
-
-func NewRegistry(initial map[string]Handler) *Registry {
-	handlers := make(map[string]Handler, len(initial))
-	maps.Copy(handlers, initial)
-	return &Registry{handlers: handlers}
-}
-
-func (r *Registry) Register(name string, handler Handler) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.handlers[name] = handler
-}
-
-func (r *Registry) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
-	r.mu.RLock()
-	handler, ok := r.handlers[call.Name]
-	r.mu.RUnlock()
-	if !ok {
-		return agent.ToolResult{}, fmt.Errorf("tool %q is not registered", call.Name)
-	}
-	content, err := handler(ctx, call.Arguments)
-	if err != nil {
-		return agent.ToolResult{}, err
-	}
-	return agent.ToolResult{
-		CallID:  call.ID,
-		Name:    call.Name,
-		Content: content,
-	}, nil
 }
 
 // RunStore is a simple in-memory implementation for local development and tests.

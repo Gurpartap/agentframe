@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"agentruntime/agent"
+	"agentruntime/agentreact"
 )
 
 // Config controls retry behavior for wrapped model and tool execution calls.
@@ -14,7 +15,7 @@ type Config struct {
 }
 
 // WrapModel wraps a model with deterministic, error-only retries.
-func WrapModel(model agent.Model, cfg Config) agent.Model {
+func WrapModel(model agentreact.Model, cfg Config) agentreact.Model {
 	if model == nil {
 		return nil
 	}
@@ -25,11 +26,11 @@ func WrapModel(model agent.Model, cfg Config) agent.Model {
 }
 
 type modelWrapper struct {
-	next agent.Model
+	next agentreact.Model
 	cfg  Config
 }
 
-func (w *modelWrapper) Generate(ctx context.Context, request agent.ModelRequest) (agent.Message, error) {
+func (w *modelWrapper) Generate(ctx context.Context, request agentreact.ModelRequest) (agent.Message, error) {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return agent.Message{}, ctxErr
 	}
@@ -50,7 +51,7 @@ func (w *modelWrapper) Generate(ctx context.Context, request agent.ModelRequest)
 }
 
 // WrapToolExecutor wraps a tool executor with deterministic, error-only retries.
-func WrapToolExecutor(executor agent.ToolExecutor, cfg Config) agent.ToolExecutor {
+func WrapToolExecutor(executor agentreact.ToolExecutor, cfg Config) agentreact.ToolExecutor {
 	if executor == nil {
 		return nil
 	}
@@ -61,7 +62,7 @@ func WrapToolExecutor(executor agent.ToolExecutor, cfg Config) agent.ToolExecuto
 }
 
 type toolExecutorWrapper struct {
-	next agent.ToolExecutor
+	next agentreact.ToolExecutor
 	cfg  Config
 }
 

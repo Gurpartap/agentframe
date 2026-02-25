@@ -14,12 +14,12 @@ const DefaultMaxSteps = 8
 // ReactLoop executes a minimal ReAct sequence:
 // model -> tool calls -> tool observations -> model -> ...
 type ReactLoop struct {
-	model  agent.Model
-	tools  agent.ToolExecutor
+	model  Model
+	tools  ToolExecutor
 	events agent.EventSink
 }
 
-func New(model agent.Model, tools agent.ToolExecutor, events agent.EventSink) (*ReactLoop, error) {
+func New(model Model, tools ToolExecutor, events agent.EventSink) (*ReactLoop, error) {
 	if model == nil {
 		return nil, errors.New("model is required")
 	}
@@ -70,7 +70,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 
 		state.Step++
 
-		assistant, err := l.model.Generate(ctx, agent.ModelRequest{
+		assistant, err := l.model.Generate(ctx, ModelRequest{
 			Messages: agent.CloneMessages(state.Messages),
 			Tools:    cloneToolDefinitions(input.Tools),
 		})

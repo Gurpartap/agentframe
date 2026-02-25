@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"agentruntime/agent"
+	"agentruntime/agentreact"
 )
 
 type response struct {
@@ -27,9 +28,9 @@ func newScriptedModel(responses ...response) *scriptedModel {
 	return &scriptedModel{responses: cloned}
 }
 
-var _ agent.Model = (*scriptedModel)(nil)
+var _ agentreact.Model = (*scriptedModel)(nil)
 
-func (m *scriptedModel) Generate(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
+func (m *scriptedModel) Generate(_ context.Context, _ agentreact.ModelRequest) (agent.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
