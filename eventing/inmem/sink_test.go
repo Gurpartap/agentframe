@@ -104,3 +104,18 @@ func TestSink_PublishFailsFastOnDoneContext(t *testing.T) {
 		})
 	}
 }
+
+func TestSink_PublishRejectsEmptyRunID(t *testing.T) {
+	t.Parallel()
+
+	sink := eventinginmem.New()
+	err := sink.Publish(context.Background(), agent.Event{
+		Type: agent.EventTypeRunCheckpoint,
+	})
+	if !errors.Is(err, agent.ErrInvalidRunID) {
+		t.Fatalf("expected ErrInvalidRunID, got %v", err)
+	}
+	if got := sink.Events(); len(got) != 0 {
+		t.Fatalf("expected no events after invalid run id publish, got %d", len(got))
+	}
+}

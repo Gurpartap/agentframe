@@ -2,6 +2,7 @@ package inmem
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"agentruntime/agent"
@@ -22,6 +23,9 @@ func New() *Sink {
 func (s *Sink) Publish(ctx context.Context, event agent.Event) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
+	}
+	if event.RunID == "" {
+		return fmt.Errorf("%w: publish event with empty run id", agent.ErrInvalidRunID)
 	}
 
 	s.mu.Lock()
