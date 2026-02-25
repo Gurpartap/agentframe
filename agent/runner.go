@@ -104,6 +104,32 @@ func validateEngineOutput(prev RunState, next RunState) error {
 	return nil
 }
 
+func validateToolDefinitions(command CommandKind, tools []ToolDefinition) error {
+	seen := make(map[string]struct{}, len(tools))
+	for i := range tools {
+		name := tools[i].Name
+		if name == "" {
+			return fmt.Errorf(
+				"%w: command=%s index=%d reason=empty_name",
+				ErrToolDefinitionsInvalid,
+				command,
+				i,
+			)
+		}
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf(
+				"%w: command=%s index=%d name=%q reason=duplicate_name",
+				ErrToolDefinitionsInvalid,
+				command,
+				i,
+				name,
+			)
+		}
+		seen[name] = struct{}{}
+	}
+	return nil
+}
+
 func sideEffectContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()
@@ -163,6 +189,9 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (RunResult, error) {
 
 func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult, error) {
 	input := cmd.Input
+	if err := validateToolDefinitions(CommandKindStart, input.Tools); err != nil {
+		return RunResult{}, err
+	}
 	runID := input.RunID
 	if runID == "" {
 		generated, err := r.idGen.NewRunID(ctx)
@@ -257,6 +286,9 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 	runID := cmd.RunID
 	if runID == "" {
 		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindContinue)
+	}
+	if err := validateToolDefinitions(CommandKindContinue, cmd.Tools); err != nil {
+		return RunResult{}, err
 	}
 	sideEffectCtx := func() context.Context { return sideEffectContext(ctx) }
 	state, err := r.store.Load(sideEffectCtx(), runID)
@@ -402,6 +434,9 @@ func (r *Runner) FollowUp(ctx context.Context, runID RunID, prompt string, maxSt
 func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (RunResult, error) {
 	if cmd.RunID == "" {
 		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindFollowUp)
+	}
+	if err := validateToolDefinitions(CommandKindFollowUp, cmd.Tools); err != nil {
+		return RunResult{}, err
 	}
 	sideEffectCtx := func() context.Context { return sideEffectContext(ctx) }
 	state, err := r.store.Load(sideEffectCtx(), cmd.RunID)

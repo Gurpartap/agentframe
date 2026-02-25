@@ -599,6 +599,97 @@ func TestRunnerDispatch_InvalidInputMatrix(t *testing.T) {
 				return runner.Dispatch(context.Background(), agent.FollowUpCommand{RunID: "", UserPrompt: "follow up", MaxSteps: 3})
 			},
 		},
+		{
+			name:    "empty_tool_name_start",
+			wantErr: agent.ErrToolDefinitionsInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.StartCommand{
+					Input: agent.RunInput{
+						RunID:      startRunID,
+						UserPrompt: "start",
+						MaxSteps:   3,
+						Tools: []agent.ToolDefinition{
+							{Name: ""},
+						},
+					},
+				})
+			},
+			checkAbsent: startRunID,
+		},
+		{
+			name:    "duplicate_tool_name_start",
+			wantErr: agent.ErrToolDefinitionsInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.StartCommand{
+					Input: agent.RunInput{
+						RunID:      startRunID,
+						UserPrompt: "start",
+						MaxSteps:   3,
+						Tools: []agent.ToolDefinition{
+							{Name: "lookup"},
+							{Name: "lookup"},
+						},
+					},
+				})
+			},
+			checkAbsent: startRunID,
+		},
+		{
+			name:    "empty_tool_name_continue",
+			wantErr: agent.ErrToolDefinitionsInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.ContinueCommand{
+					RunID:    existingRunID,
+					MaxSteps: 3,
+					Tools: []agent.ToolDefinition{
+						{Name: ""},
+					},
+				})
+			},
+		},
+		{
+			name:    "duplicate_tool_name_continue",
+			wantErr: agent.ErrToolDefinitionsInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.ContinueCommand{
+					RunID:    existingRunID,
+					MaxSteps: 3,
+					Tools: []agent.ToolDefinition{
+						{Name: "lookup"},
+						{Name: "lookup"},
+					},
+				})
+			},
+		},
+		{
+			name:    "empty_tool_name_follow_up",
+			wantErr: agent.ErrToolDefinitionsInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.FollowUpCommand{
+					RunID:      existingRunID,
+					UserPrompt: "follow up",
+					MaxSteps:   3,
+					Tools: []agent.ToolDefinition{
+						{Name: ""},
+					},
+				})
+			},
+		},
+		{
+			name:    "duplicate_tool_name_follow_up",
+			wantErr: agent.ErrToolDefinitionsInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), agent.FollowUpCommand{
+					RunID:      existingRunID,
+					UserPrompt: "follow up",
+					MaxSteps:   3,
+					Tools: []agent.ToolDefinition{
+						{Name: "lookup"},
+						{Name: "lookup"},
+					},
+				})
+			},
+		},
 	}
 
 	for _, tc := range cases {
