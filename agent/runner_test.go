@@ -7,14 +7,15 @@ import (
 	"testing"
 
 	"agentruntime/agent"
-	"agentruntime/agent/internal/testkit"
+	eventinginmem "agentruntime/eventing/inmem"
+	runstoreinmem "agentruntime/runstore/inmem"
 )
 
 func TestRunnerRun_PersistsAndCompletesWithEngine(t *testing.T) {
 	t.Parallel()
 
-	store := testkit.NewRunStore()
-	events := testkit.NewEventSink()
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
 	var gotState agent.RunState
 	var gotInput agent.EngineInput
 	engine := &engineSpy{
@@ -106,8 +107,8 @@ func TestRunnerRun_PersistsAndCompletesWithEngine(t *testing.T) {
 func TestRunnerRun_PropagatesEngineError(t *testing.T) {
 	t.Parallel()
 
-	store := testkit.NewRunStore()
-	events := testkit.NewEventSink()
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
 	engine := &engineSpy{
 		executeFn: func(_ context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
 			next := state

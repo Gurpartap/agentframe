@@ -8,13 +8,13 @@ import (
 	"testing"
 
 	"agentruntime/agent"
-	"agentruntime/agent/internal/testkit"
+	runstoreinmem "agentruntime/runstore/inmem"
 )
 
 func TestRunnerRun_EventPublishFailureKeepsPersistedState(t *testing.T) {
 	t.Parallel()
 
-	store := testkit.NewRunStore()
+	store := runstoreinmem.New()
 	events := newFailingEventSink(1, errors.New("sink unavailable"))
 	engine := &engineSpy{
 		executeFn: func(_ context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
@@ -35,7 +35,7 @@ func TestRunnerRun_EventPublishFailureKeepsPersistedState(t *testing.T) {
 		},
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("event-fail"),
+		IDGenerator: newCounterIDGenerator("event-fail"),
 		RunStore:    store,
 		Engine:      engine,
 		EventSink:   events,
@@ -73,7 +73,7 @@ func TestRunnerRun_EventPublishFailureKeepsPersistedState(t *testing.T) {
 func TestRunnerRun_CombinesEngineAndEventPublishErrors(t *testing.T) {
 	t.Parallel()
 
-	store := testkit.NewRunStore()
+	store := runstoreinmem.New()
 	events := newFailingEventSink(1, errors.New("sink unavailable"))
 	engine := &engineSpy{
 		executeFn: func(_ context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
@@ -90,7 +90,7 @@ func TestRunnerRun_CombinesEngineAndEventPublishErrors(t *testing.T) {
 		},
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("event-fail"),
+		IDGenerator: newCounterIDGenerator("event-fail"),
 		RunStore:    store,
 		Engine:      engine,
 		EventSink:   events,
@@ -120,7 +120,7 @@ func TestRunnerRun_CombinesEngineAndEventPublishErrors(t *testing.T) {
 func TestRunnerCancel_EventPublishFailureKeepsPersistedState(t *testing.T) {
 	t.Parallel()
 
-	store := testkit.NewRunStore()
+	store := runstoreinmem.New()
 	initial := agent.RunState{
 		ID:     "cancel-event-fail",
 		Status: agent.RunStatusRunning,
@@ -131,7 +131,7 @@ func TestRunnerCancel_EventPublishFailureKeepsPersistedState(t *testing.T) {
 	}
 	events := newFailingEventSink(1, errors.New("sink unavailable"))
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("event-fail"),
+		IDGenerator: newCounterIDGenerator("event-fail"),
 		RunStore:    store,
 		Engine:      &engineSpy{},
 		EventSink:   events,

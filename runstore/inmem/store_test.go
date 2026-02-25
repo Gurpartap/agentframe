@@ -1,4 +1,4 @@
-package testkit
+package inmem_test
 
 import (
 	"context"
@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"agentruntime/agent"
+	runstoreinmem "agentruntime/runstore/inmem"
 )
 
-func TestRunStore_SaveVersioningAndConflict(t *testing.T) {
+func TestStore_SaveVersioningAndConflict(t *testing.T) {
 	t.Parallel()
 
-	store := NewRunStore()
+	store := runstoreinmem.New()
 	runID := agent.RunID("run-1")
 	initial := agent.RunState{
 		ID:     runID,

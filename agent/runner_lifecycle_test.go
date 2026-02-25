@@ -7,7 +7,8 @@ import (
 	"testing"
 
 	"agentruntime/agent"
-	"agentruntime/agent/internal/testkit"
+	eventinginmem "agentruntime/eventing/inmem"
+	runstoreinmem "agentruntime/runstore/inmem"
 )
 
 func TestRunnerCancel_NonTerminalStates(t *testing.T) {
@@ -26,8 +27,8 @@ func TestRunnerCancel_NonTerminalStates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := testkit.NewRunStore()
-			events := testkit.NewEventSink()
+			store := runstoreinmem.New()
+			events := eventinginmem.New()
 			runner := newLifecycleRunner(t, store, events)
 
 			initial := agent.RunState{
@@ -111,8 +112,8 @@ func TestRunnerCancel_TerminalStatesRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := testkit.NewRunStore()
-			events := testkit.NewEventSink()
+			store := runstoreinmem.New()
+			events := eventinginmem.New()
 			runner := newLifecycleRunner(t, store, events)
 
 			initial := agent.RunState{
@@ -171,8 +172,8 @@ func TestRunnerContinue_TerminalStatesRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := testkit.NewRunStore()
-			events := testkit.NewEventSink()
+			store := runstoreinmem.New()
+			events := eventinginmem.New()
 			runner := newLifecycleRunner(t, store, events)
 
 			initial := agent.RunState{
@@ -209,8 +210,8 @@ func TestRunnerContinue_TerminalStatesRejected(t *testing.T) {
 func TestRunnerRun_PreCancelledContext(t *testing.T) {
 	t.Parallel()
 
-	store := testkit.NewRunStore()
-	events := testkit.NewEventSink()
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
 	runner := newLifecycleRunner(t, store, events)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -266,8 +267,8 @@ func TestRunnerRun_PreCancelledContext(t *testing.T) {
 func TestRunnerContinue_CancelledContext(t *testing.T) {
 	t.Parallel()
 
-	store := testkit.NewRunStore()
-	events := testkit.NewEventSink()
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
 	runner := newLifecycleRunner(t, store, events)
 
 	initial := agent.RunState{
@@ -328,14 +329,14 @@ func TestRunnerContinue_CancelledContext(t *testing.T) {
 	}
 }
 
-func newLifecycleRunner(t *testing.T, store *testkit.RunStore, events *testkit.EventSink) *agent.Runner {
+func newLifecycleRunner(t *testing.T, store *runstoreinmem.Store, events *eventinginmem.Sink) *agent.Runner {
 	t.Helper()
 
 	return newDispatchRunner(
 		t,
 		store,
 		events,
-		testkit.Response{
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "ok",

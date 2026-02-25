@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"agentruntime/agent"
-	"agentruntime/agent/internal/testkit"
+	eventinginmem "agentruntime/eventing/inmem"
+	runstoreinmem "agentruntime/runstore/inmem"
 )
 
 func TestRunnerDispatch_StartWrapperParity(t *testing.T) {
@@ -20,10 +21,10 @@ func TestRunnerDispatch_StartWrapperParity(t *testing.T) {
 		UserPrompt:   "hello",
 		MaxSteps:     3,
 	}
-	wrapperRunner := newDispatchRunner(t, testkit.NewRunStore(), testkit.NewEventSink(), testkit.Response{
+	wrapperRunner := newDispatchRunner(t, runstoreinmem.New(), eventinginmem.New(), response{
 		Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
 	})
-	dispatchRunner := newDispatchRunner(t, testkit.NewRunStore(), testkit.NewEventSink(), testkit.Response{
+	dispatchRunner := newDispatchRunner(t, runstoreinmem.New(), eventinginmem.New(), response{
 		Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
 	})
 
@@ -59,19 +60,19 @@ func TestRunnerDispatch_ContinueWrapperParity(t *testing.T) {
 		},
 	}
 
-	wrapperStore := testkit.NewRunStore()
+	wrapperStore := runstoreinmem.New()
 	if err := wrapperStore.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed wrapper store: %v", err)
 	}
-	dispatchStore := testkit.NewRunStore()
+	dispatchStore := runstoreinmem.New()
 	if err := dispatchStore.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed dispatch store: %v", err)
 	}
 
-	wrapperRunner := newDispatchRunner(t, wrapperStore, testkit.NewEventSink(), testkit.Response{
+	wrapperRunner := newDispatchRunner(t, wrapperStore, eventinginmem.New(), response{
 		Message: agent.Message{Role: agent.RoleAssistant, Content: "continued"},
 	})
-	dispatchRunner := newDispatchRunner(t, dispatchStore, testkit.NewEventSink(), testkit.Response{
+	dispatchRunner := newDispatchRunner(t, dispatchStore, eventinginmem.New(), response{
 		Message: agent.Message{Role: agent.RoleAssistant, Content: "continued"},
 	})
 
@@ -111,19 +112,19 @@ func TestRunnerDispatch_CancelWrapperParity(t *testing.T) {
 		Step:   7,
 	}
 
-	wrapperStore := testkit.NewRunStore()
+	wrapperStore := runstoreinmem.New()
 	if err := wrapperStore.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed wrapper store: %v", err)
 	}
-	dispatchStore := testkit.NewRunStore()
+	dispatchStore := runstoreinmem.New()
 	if err := dispatchStore.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed dispatch store: %v", err)
 	}
 
-	wrapperRunner := newDispatchRunner(t, wrapperStore, testkit.NewEventSink(), testkit.Response{
+	wrapperRunner := newDispatchRunner(t, wrapperStore, eventinginmem.New(), response{
 		Message: agent.Message{Role: agent.RoleAssistant, Content: "unused"},
 	})
-	dispatchRunner := newDispatchRunner(t, dispatchStore, testkit.NewEventSink(), testkit.Response{
+	dispatchRunner := newDispatchRunner(t, dispatchStore, eventinginmem.New(), response{
 		Message: agent.Message{Role: agent.RoleAssistant, Content: "unused"},
 	})
 
@@ -163,19 +164,19 @@ func TestRunnerDispatch_SteerWrapperParity(t *testing.T) {
 		},
 	}
 
-	wrapperStore := testkit.NewRunStore()
+	wrapperStore := runstoreinmem.New()
 	if err := wrapperStore.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed wrapper store: %v", err)
 	}
-	dispatchStore := testkit.NewRunStore()
+	dispatchStore := runstoreinmem.New()
 	if err := dispatchStore.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed dispatch store: %v", err)
 	}
 
-	wrapperEvents := testkit.NewEventSink()
+	wrapperEvents := eventinginmem.New()
 	wrapperEngine := &engineSpy{}
 	wrapperRunner := newDispatchRunnerWithEngine(t, wrapperStore, wrapperEvents, wrapperEngine)
-	dispatchEvents := testkit.NewEventSink()
+	dispatchEvents := eventinginmem.New()
 	dispatchEngine := &engineSpy{}
 	dispatchRunner := newDispatchRunnerWithEngine(t, dispatchStore, dispatchEvents, dispatchEngine)
 
@@ -222,33 +223,33 @@ func TestRunnerDispatch_FollowUpWrapperParity(t *testing.T) {
 		},
 	}
 
-	wrapperStore := testkit.NewRunStore()
+	wrapperStore := runstoreinmem.New()
 	if err := wrapperStore.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed wrapper store: %v", err)
 	}
-	dispatchStore := testkit.NewRunStore()
+	dispatchStore := runstoreinmem.New()
 	if err := dispatchStore.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed dispatch store: %v", err)
 	}
 
-	wrapperEvents := testkit.NewEventSink()
+	wrapperEvents := eventinginmem.New()
 	wrapperRunner := newDispatchRunner(
 		t,
 		wrapperStore,
 		wrapperEvents,
-		testkit.Response{
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "follow-up done",
 			},
 		},
 	)
-	dispatchEvents := testkit.NewEventSink()
+	dispatchEvents := eventinginmem.New()
 	dispatchRunner := newDispatchRunner(
 		t,
 		dispatchStore,
 		dispatchEvents,
-		testkit.Response{
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "follow-up done",
@@ -291,7 +292,7 @@ func TestRunnerDispatch_FollowUpWrapperParity(t *testing.T) {
 func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
 	t.Parallel()
 
-	runner := newDispatchRunner(t, testkit.NewRunStore(), testkit.NewEventSink(), testkit.Response{
+	runner := newDispatchRunner(t, runstoreinmem.New(), eventinginmem.New(), response{
 		Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
 	})
 
@@ -360,7 +361,7 @@ func TestRunnerSteer_AppendsTranscriptWithoutEngineExecution(t *testing.T) {
 		},
 	}
 
-	store := testkit.NewRunStore()
+	store := runstoreinmem.New()
 	if err := store.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
@@ -369,7 +370,7 @@ func TestRunnerSteer_AppendsTranscriptWithoutEngineExecution(t *testing.T) {
 		t.Fatalf("load initial: %v", err)
 	}
 
-	events := testkit.NewEventSink()
+	events := eventinginmem.New()
 	engine := &engineSpy{}
 	runner := newDispatchRunnerWithEngine(t, store, events, engine)
 
@@ -425,7 +426,7 @@ func TestRunnerFollowUp_AppendsTranscriptAndInvokesEngine(t *testing.T) {
 		},
 	}
 
-	store := testkit.NewRunStore()
+	store := runstoreinmem.New()
 	if err := store.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
@@ -434,7 +435,7 @@ func TestRunnerFollowUp_AppendsTranscriptAndInvokesEngine(t *testing.T) {
 		t.Fatalf("load initial: %v", err)
 	}
 
-	events := testkit.NewEventSink()
+	events := eventinginmem.New()
 	engine := &engineSpy{
 		executeFn: func(_ context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
 			if len(state.Messages) != len(persistedInitial.Messages)+1 {
@@ -510,16 +511,16 @@ func TestRunnerSteerThenFollowUp_TranscriptAppendOnly(t *testing.T) {
 			{Role: agent.RoleUser, Content: "original"},
 		},
 	}
-	store := testkit.NewRunStore()
+	store := runstoreinmem.New()
 	if err := store.Save(context.Background(), initial); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
-	events := testkit.NewEventSink()
+	events := eventinginmem.New()
 	runner := newDispatchRunner(
 		t,
 		store,
 		events,
-		testkit.Response{
+		response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "follow-up done",
@@ -600,7 +601,7 @@ func TestRunnerDispatch_TerminalStateImmutabilityForMutatingCommands(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := testkit.NewRunStore()
+			store := runstoreinmem.New()
 			if err := store.Save(context.Background(), initial); err != nil {
 				t.Fatalf("seed store: %v", err)
 			}
@@ -609,7 +610,7 @@ func TestRunnerDispatch_TerminalStateImmutabilityForMutatingCommands(t *testing.
 				t.Fatalf("load initial: %v", err)
 			}
 
-			events := testkit.NewEventSink()
+			events := eventinginmem.New()
 			engine := &engineSpy{}
 			runner := newDispatchRunnerWithEngine(t, store, events, engine)
 
@@ -675,15 +676,15 @@ func (invalidFollowUpCommand) Kind() agent.CommandKind {
 
 func newDispatchRunner(
 	t *testing.T,
-	store *testkit.RunStore,
-	events *testkit.EventSink,
-	responses ...testkit.Response,
+	store *runstoreinmem.Store,
+	events *eventinginmem.Sink,
+	responses ...response,
 ) *agent.Runner {
 	t.Helper()
 
 	engine := &scriptedEngine{
 		events:    events,
-		responses: append([]testkit.Response(nil), responses...),
+		responses: append([]response(nil), responses...),
 	}
 	return newDispatchRunnerWithEngine(t, store, events, engine)
 }
@@ -703,14 +704,14 @@ func (s *engineSpy) Execute(ctx context.Context, state agent.RunState, input age
 
 func newDispatchRunnerWithEngine(
 	t *testing.T,
-	store *testkit.RunStore,
-	events *testkit.EventSink,
+	store *runstoreinmem.Store,
+	events *eventinginmem.Sink,
 	engine agent.Engine,
 ) *agent.Runner {
 	t.Helper()
 
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: testkit.NewCounterIDGenerator("dispatch"),
+		IDGenerator: newCounterIDGenerator("dispatch"),
 		RunStore:    store,
 		Engine:      engine,
 		EventSink:   events,
@@ -750,7 +751,7 @@ func assertCommandKind(t *testing.T, events []agent.Event, want agent.CommandKin
 type scriptedEngine struct {
 	index     int
 	events    agent.EventSink
-	responses []testkit.Response
+	responses []response
 }
 
 func (s *scriptedEngine) Execute(ctx context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
