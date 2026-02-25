@@ -133,6 +133,16 @@ func validateToolDefinitions(command CommandKind, tools []ToolDefinition) error 
 	return nil
 }
 
+func normalizeCommandSaveError(command CommandKind, err error) error {
+	if !errors.Is(err, ErrRunVersionConflict) {
+		return err
+	}
+	return errors.Join(
+		ErrCommandConflict,
+		fmt.Errorf("command=%s: %w", command, err),
+	)
+}
+
 func sideEffectContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()
@@ -229,7 +239,7 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 	sideEffectCtx := func() context.Context { return sideEffectContext(ctx) }
 
 	if err := r.store.Save(sideEffectCtx(), state); err != nil {
-		return RunResult{}, err
+		return RunResult{}, normalizeCommandSaveError(CommandKindStart, err)
 	}
 	state.Version++
 	var eventErr error
@@ -249,6 +259,7 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 	}
 
 	if saveErr := r.store.Save(sideEffectCtx(), finalState); saveErr != nil {
+		saveErr = normalizeCommandSaveError(CommandKindStart, saveErr)
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
 	if finalState.Status == RunStatusCancelled {
@@ -310,6 +321,7 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 		return RunResult{}, errors.Join(contractErr, eventErr)
 	}
 	if saveErr := r.store.Save(sideEffectCtx(), finalState); saveErr != nil {
+		saveErr = normalizeCommandSaveError(CommandKindContinue, saveErr)
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
 	if finalState.Status == RunStatusCancelled {
@@ -359,7 +371,7 @@ func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResu
 		return RunResult{State: state}, err
 	}
 	if err := r.store.Save(sideEffectCtx(), state); err != nil {
-		return RunResult{}, err
+		return RunResult{}, normalizeCommandSaveError(CommandKindCancel, err)
 	}
 	state.Version++
 	var eventErr error
@@ -462,6 +474,7 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 		return RunResult{}, errors.Join(contractErr, eventErr)
 	}
 	if saveErr := r.store.Save(sideEffectCtx(), finalState); saveErr != nil {
+		saveErr = normalizeCommandSaveError(CommandKindFollowUp, saveErr)
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
 	if finalState.Status == RunStatusCancelled {

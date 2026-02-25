@@ -23,6 +23,8 @@ var (
 	ErrContextNil = errors.New("context is nil")
 	// ErrCommandInvalid is returned when command kind and payload type are inconsistent.
 	ErrCommandInvalid = errors.New("command is invalid")
+	// ErrCommandConflict is returned when a mutating command cannot be persisted due to optimistic concurrency conflict.
+	ErrCommandConflict = errors.New("command conflict")
 	// ErrCommandUnsupported is returned when command kind has no runtime handler.
 	ErrCommandUnsupported = errors.New("command is unsupported")
 	// ErrInvalidRunID is returned when a runtime command is invoked with an empty or invalid run ID.
