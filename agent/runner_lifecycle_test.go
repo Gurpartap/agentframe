@@ -329,6 +329,62 @@ func TestRunnerContinue_CancelledContext(t *testing.T) {
 	}
 }
 
+func TestRunnerFollowUp_CancelledContext(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
+	runner := newLifecycleRunner(t, store, events)
+
+	initial := agent.RunState{
+		ID:     agent.RunID("run-follow-up-cancelled-context"),
+		Status: agent.RunStatusPending,
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+	persistedInitial, err := store.Load(context.Background(), initial.ID)
+	if err != nil {
+		t.Fatalf("load initial state: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := runner.FollowUp(ctx, initial.ID, "follow-up prompt", 3, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if result.State.Status != agent.RunStatusCancelled {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.Error != context.Canceled.Error() {
+		t.Fatalf("unexpected error text: %q", result.State.Error)
+	}
+	if result.State.Step != persistedInitial.Step {
+		t.Fatalf("unexpected step: got=%d want=%d", result.State.Step, persistedInitial.Step)
+	}
+	if result.State.Version != persistedInitial.Version+1 {
+		t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version+1)
+	}
+
+	loaded, err := store.Load(context.Background(), initial.ID)
+	if err != nil {
+		t.Fatalf("load follow-up state: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, result.State) {
+		t.Fatalf("saved state mismatch: got=%+v want=%+v", loaded, result.State)
+	}
+
+	gotEvents := events.Events()
+	assertEventTypes(t, gotEvents, []agent.EventType{
+		agent.EventTypeRunCancelled,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	})
+	assertCommandKind(t, gotEvents, agent.CommandKindFollowUp)
+}
+
 func newLifecycleRunner(t *testing.T, store *runstoreinmem.Store, events *eventinginmem.Sink) *agent.Runner {
 	t.Helper()
 
