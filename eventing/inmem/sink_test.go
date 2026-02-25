@@ -119,3 +119,19 @@ func TestSink_PublishRejectsEmptyRunID(t *testing.T) {
 		t.Fatalf("expected no events after invalid run id publish, got %d", len(got))
 	}
 }
+
+func TestSink_PublishRejectsNilContextWithoutEmittingEvents(t *testing.T) {
+	t.Parallel()
+
+	sink := eventinginmem.New()
+	err := sink.Publish(nil, agent.Event{
+		RunID: "run-nil-context",
+		Type:  agent.EventTypeRunCheckpoint,
+	})
+	if !errors.Is(err, agent.ErrContextNil) {
+		t.Fatalf("expected ErrContextNil, got %v", err)
+	}
+	if got := sink.Events(); len(got) != 0 {
+		t.Fatalf("expected no events after nil-context publish rejection, got %d", len(got))
+	}
+}

@@ -226,3 +226,26 @@ func TestRegistryExecute_ContextDeadlineExceededFailsFastWithoutHandlerInvocatio
 		t.Fatalf("handler must not be invoked when context deadline is exceeded")
 	}
 }
+
+func TestRegistryExecute_NilContextFailsFastWithoutHandlerInvocation(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	registry := toolingregistry.New(map[string]toolingregistry.Handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			called = true
+			return "unexpected", nil
+		},
+	})
+
+	result, err := registry.Execute(nil, agent.ToolCall{ID: "call-nil-context", Name: "lookup"})
+	if !errors.Is(err, agent.ErrContextNil) {
+		t.Fatalf("expected ErrContextNil, got %v", err)
+	}
+	if result != (agent.ToolResult{}) {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if called {
+		t.Fatalf("handler must not be invoked when context is nil")
+	}
+}

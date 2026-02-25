@@ -21,6 +21,9 @@ func New() *Store {
 }
 
 func (s *Store) Save(ctx context.Context, state agent.RunState) error {
+	if ctx == nil {
+		return agent.ErrContextNil
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
@@ -63,6 +66,9 @@ func (s *Store) Save(ctx context.Context, state agent.RunState) error {
 }
 
 func (s *Store) Load(ctx context.Context, runID agent.RunID) (agent.RunState, error) {
+	if ctx == nil {
+		return agent.RunState{}, agent.ErrContextNil
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return agent.RunState{}, ctxErr
 	}

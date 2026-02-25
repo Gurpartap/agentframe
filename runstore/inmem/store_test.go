@@ -88,6 +88,61 @@ func TestStore_LoadRejectsEmptyRunID(t *testing.T) {
 	}
 }
 
+func TestStore_NilContextRejectedWithoutSideEffects(t *testing.T) {
+	t.Parallel()
+
+	t.Run("save", func(t *testing.T) {
+		t.Parallel()
+
+		store := runstoreinmem.New()
+		state := agent.RunState{
+			ID:     agent.RunID("run-nil-save"),
+			Status: agent.RunStatusPending,
+		}
+
+		err := store.Save(nil, state)
+		if !errors.Is(err, agent.ErrContextNil) {
+			t.Fatalf("expected ErrContextNil, got %v", err)
+		}
+		if _, loadErr := store.Load(context.Background(), state.ID); !errors.Is(loadErr, agent.ErrRunNotFound) {
+			t.Fatalf("expected ErrRunNotFound after nil-context save rejection, got %v", loadErr)
+		}
+	})
+
+	t.Run("load", func(t *testing.T) {
+		t.Parallel()
+
+		store := runstoreinmem.New()
+		seed := agent.RunState{
+			ID:     agent.RunID("run-nil-load"),
+			Status: agent.RunStatusPending,
+		}
+		if err := store.Save(context.Background(), seed); err != nil {
+			t.Fatalf("seed state: %v", err)
+		}
+		persistedBefore, err := store.Load(context.Background(), seed.ID)
+		if err != nil {
+			t.Fatalf("load seed: %v", err)
+		}
+
+		loaded, err := store.Load(nil, seed.ID)
+		if !errors.Is(err, agent.ErrContextNil) {
+			t.Fatalf("expected ErrContextNil, got %v", err)
+		}
+		if !reflect.DeepEqual(loaded, agent.RunState{}) {
+			t.Fatalf("unexpected state on nil-context load rejection: %+v", loaded)
+		}
+
+		persistedAfter, err := store.Load(context.Background(), seed.ID)
+		if err != nil {
+			t.Fatalf("reload seed: %v", err)
+		}
+		if !reflect.DeepEqual(persistedAfter, persistedBefore) {
+			t.Fatalf("persisted state mutated by nil-context load: got=%+v want=%+v", persistedAfter, persistedBefore)
+		}
+	})
+}
+
 func TestStore_SaveFailsFastOnDoneContext(t *testing.T) {
 	t.Parallel()
 

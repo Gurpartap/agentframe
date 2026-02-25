@@ -21,6 +21,9 @@ func New() *Sink {
 }
 
 func (s *Sink) Publish(ctx context.Context, event agent.Event) error {
+	if ctx == nil {
+		return agent.ErrContextNil
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
