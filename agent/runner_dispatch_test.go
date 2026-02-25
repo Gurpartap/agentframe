@@ -330,6 +330,30 @@ func TestRunnerDispatch_InvalidInputMatrix(t *testing.T) {
 	var nilSteer *agent.SteerCommand
 	var nilFollowUp *agent.FollowUpCommand
 	var nilUnknown *unknownCommand
+	pointerStart := &agent.StartCommand{
+		Input: agent.RunInput{
+			RunID:      startRunID,
+			UserPrompt: "pointer start",
+			MaxSteps:   3,
+		},
+	}
+	pointerContinue := &agent.ContinueCommand{
+		RunID:    existingRunID,
+		MaxSteps: 3,
+	}
+	pointerCancel := &agent.CancelCommand{
+		RunID: existingRunID,
+	}
+	pointerSteer := &agent.SteerCommand{
+		RunID:       existingRunID,
+		Instruction: "pointer steer",
+	}
+	pointerFollowUp := &agent.FollowUpCommand{
+		RunID:      existingRunID,
+		UserPrompt: "pointer follow up",
+		MaxSteps:   3,
+	}
+	pointerUnknown := &unknownCommand{}
 
 	type matrixCase struct {
 		name        string
@@ -460,6 +484,49 @@ func TestRunnerDispatch_InvalidInputMatrix(t *testing.T) {
 			wantErr: agent.ErrCommandNil,
 			call: func(runner *agent.Runner) (agent.RunResult, error) {
 				return runner.Dispatch(context.Background(), nilUnknown)
+			},
+		},
+		{
+			name:    "pointer_start_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), pointerStart)
+			},
+			checkAbsent: startRunID,
+		},
+		{
+			name:    "pointer_continue_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), pointerContinue)
+			},
+		},
+		{
+			name:    "pointer_cancel_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), pointerCancel)
+			},
+		},
+		{
+			name:    "pointer_steer_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), pointerSteer)
+			},
+		},
+		{
+			name:    "pointer_follow_up_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), pointerFollowUp)
+			},
+		},
+		{
+			name:    "pointer_unknown_command",
+			wantErr: agent.ErrCommandInvalid,
+			call: func(runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Dispatch(context.Background(), pointerUnknown)
 			},
 		},
 		{

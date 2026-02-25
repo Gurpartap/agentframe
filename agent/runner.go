@@ -122,43 +122,21 @@ func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
 	if isNilCommand(cmd) {
 		return RunResult{}, ErrCommandNil
 	}
+	if reflect.ValueOf(cmd).Kind() == reflect.Pointer {
+		return RunResult{}, fmt.Errorf("%w: kind=%s payload=%T", ErrCommandInvalid, cmd.Kind(), cmd)
+	}
 
 	switch command := cmd.(type) {
 	case StartCommand:
 		return r.dispatchStart(ctx, command)
-	case *StartCommand:
-		if command == nil {
-			return RunResult{}, ErrCommandNil
-		}
-		return r.dispatchStart(ctx, *command)
 	case ContinueCommand:
 		return r.dispatchContinue(ctx, command)
-	case *ContinueCommand:
-		if command == nil {
-			return RunResult{}, ErrCommandNil
-		}
-		return r.dispatchContinue(ctx, *command)
 	case CancelCommand:
 		return r.dispatchCancel(ctx, command)
-	case *CancelCommand:
-		if command == nil {
-			return RunResult{}, ErrCommandNil
-		}
-		return r.dispatchCancel(ctx, *command)
 	case SteerCommand:
 		return r.dispatchSteer(ctx, command)
-	case *SteerCommand:
-		if command == nil {
-			return RunResult{}, ErrCommandNil
-		}
-		return r.dispatchSteer(ctx, *command)
 	case FollowUpCommand:
 		return r.dispatchFollowUp(ctx, command)
-	case *FollowUpCommand:
-		if command == nil {
-			return RunResult{}, ErrCommandNil
-		}
-		return r.dispatchFollowUp(ctx, *command)
 	default:
 		switch kind := cmd.Kind(); kind {
 		case CommandKindStart, CommandKindContinue, CommandKindCancel, CommandKindSteer, CommandKindFollowUp:
@@ -175,12 +153,7 @@ func isNilCommand(cmd Command) bool {
 	}
 
 	value := reflect.ValueOf(cmd)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
+	return value.Kind() == reflect.Pointer && value.IsNil()
 }
 
 // Run executes a new run from prompts and returns final state.
