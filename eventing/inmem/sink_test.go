@@ -112,8 +112,8 @@ func TestSink_PublishRejectsEmptyRunID(t *testing.T) {
 	err := sink.Publish(context.Background(), agent.Event{
 		Type: agent.EventTypeRunCheckpoint,
 	})
-	if !errors.Is(err, agent.ErrInvalidRunID) {
-		t.Fatalf("expected ErrInvalidRunID, got %v", err)
+	if !errors.Is(err, agent.ErrEventInvalid) {
+		t.Fatalf("expected ErrEventInvalid, got %v", err)
 	}
 	if got := sink.Events(); len(got) != 0 {
 		t.Fatalf("expected no events after invalid run id publish, got %d", len(got))
@@ -133,5 +133,74 @@ func TestSink_PublishRejectsNilContextWithoutEmittingEvents(t *testing.T) {
 	}
 	if got := sink.Events(); len(got) != 0 {
 		t.Fatalf("expected no events after nil-context publish rejection, got %d", len(got))
+	}
+}
+
+func TestSink_PublishRejectsInvalidEventShapesWithoutSideEffects(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name  string
+		event agent.Event
+	}{
+		{
+			name: "empty type",
+			event: agent.Event{
+				RunID: "run-invalid-1",
+				Step:  0,
+			},
+		},
+		{
+			name: "negative step",
+			event: agent.Event{
+				RunID: "run-invalid-2",
+				Step:  -1,
+				Type:  agent.EventTypeRunCheckpoint,
+			},
+		},
+		{
+			name: "command applied missing command kind",
+			event: agent.Event{
+				RunID: "run-invalid-3",
+				Step:  1,
+				Type:  agent.EventTypeCommandApplied,
+			},
+		},
+		{
+			name: "tool result missing payload",
+			event: agent.Event{
+				RunID: "run-invalid-4",
+				Step:  2,
+				Type:  agent.EventTypeToolResult,
+			},
+		},
+		{
+			name: "tool result missing identity fields",
+			event: agent.Event{
+				RunID: "run-invalid-5",
+				Step:  2,
+				Type:  agent.EventTypeToolResult,
+				ToolResult: &agent.ToolResult{
+					CallID: "",
+					Name:   "",
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := eventinginmem.New()
+			err := sink.Publish(context.Background(), tc.event)
+			if !errors.Is(err, agent.ErrEventInvalid) {
+				t.Fatalf("expected ErrEventInvalid, got %v", err)
+			}
+			if got := sink.Events(); len(got) != 0 {
+				t.Fatalf("expected no events after invalid publish, got %d", len(got))
+			}
+		})
 	}
 }
