@@ -2,8 +2,9 @@
 
 Concrete package skeleton for an agent runtime in Go with domain-first boundaries.
 
-- `agent`: runtime domain API and logic (types, interfaces, ReAct loop, runner).
-- `adapters`: infrastructure/test adapters (`inmem`, `tools`, `modeltest`).
+- `agent`: runtime core contracts and command/lifecycle semantics.
+- `agentreact`: ReAct engine implementation built on top of `agent` contracts.
+- `policy/retry`: optional retry wrappers for model/tool execution.
 
 Layering still exists, but it is represented by file-level boundaries inside `agent` instead of generic package names.
 
@@ -18,15 +19,20 @@ Layering still exists, but it is represented by file-level boundaries inside `ag
 ## Quick wiring
 
 ```go
+import (
+	"agentruntime/agent"
+	"agentruntime/agentreact"
+)
+
 model := /* your agent.Model implementation */
 tools := /* your agent.ToolExecutor implementation */
-events := inmem.NewEventSink()
-loop, _ := agent.NewReactLoop(model, tools, events)
+events := /* your agent.EventSink implementation */
+engine, _ := agentreact.New(model, tools, events)
 
 runner, _ := agent.NewRunner(agent.Dependencies{
-	IDGenerator: inmem.NewCounterIDGenerator("run"),
-	RunStore:    inmem.NewRunStore(),
-	ReactLoop:   loop,
+	IDGenerator: /* your agent.IDGenerator implementation */,
+	RunStore:    /* your agent.RunStore implementation */,
+	Engine:      engine,
 	EventSink:   events,
 })
 
