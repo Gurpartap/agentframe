@@ -265,7 +265,7 @@ func runToolTest(
 	runner, err := agent.NewRunner(agent.Dependencies{
 		IDGenerator: testkit.NewCounterIDGenerator("tool"),
 		RunStore:    testkit.NewRunStore(),
-		ReactLoop:   loop,
+		Engine:      loop,
 		EventSink:   events,
 	})
 	if err != nil {

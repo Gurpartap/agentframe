@@ -49,7 +49,7 @@ func TestConformance_EventOrdering(t *testing.T) {
 	runner, err := agent.NewRunner(agent.Dependencies{
 		IDGenerator: testkit.NewCounterIDGenerator("evt"),
 		RunStore:    testkit.NewRunStore(),
-		ReactLoop:   loop,
+		Engine:      loop,
 		EventSink:   events,
 	})
 	if err != nil {
@@ -150,7 +150,7 @@ func TestConformance_TranscriptToolCallResultLinkage(t *testing.T) {
 	runner, err := agent.NewRunner(agent.Dependencies{
 		IDGenerator: testkit.NewCounterIDGenerator("link"),
 		RunStore:    testkit.NewRunStore(),
-		ReactLoop:   loop,
+		Engine:      loop,
 		EventSink:   testkit.NewEventSink(),
 	})
 	if err != nil {
@@ -245,7 +245,7 @@ func TestConformance_ContinueDeterministicProgression(t *testing.T) {
 	runner, err := agent.NewRunner(agent.Dependencies{
 		IDGenerator: testkit.NewCounterIDGenerator("continue"),
 		RunStore:    store,
-		ReactLoop:   loop,
+		Engine:      loop,
 		EventSink:   testkit.NewEventSink(),
 	})
 	if err != nil {

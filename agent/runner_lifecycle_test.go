@@ -329,7 +329,7 @@ func newLifecycleRunner(t *testing.T, store *testkit.RunStore, events *testkit.E
 	runner, err := agent.NewRunner(agent.Dependencies{
 		IDGenerator: testkit.NewCounterIDGenerator("life"),
 		RunStore:    store,
-		ReactLoop:   loop,
+		Engine:      loop,
 		EventSink:   events,
 	})
 	if err != nil {

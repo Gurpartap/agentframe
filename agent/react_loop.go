@@ -9,12 +9,6 @@ import (
 
 const DefaultMaxSteps = 8
 
-// ReactConfig defines loop budget and tool contracts for one execution.
-type ReactConfig struct {
-	MaxSteps int
-	Tools    []ToolDefinition
-}
-
 // ReactLoop executes a minimal ReAct sequence:
 // model -> tool calls -> tool observations -> model -> ...
 type ReactLoop struct {
@@ -40,12 +34,12 @@ func NewReactLoop(model Model, tools ToolExecutor, events EventSink) (*ReactLoop
 	}, nil
 }
 
-func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig) (RunState, error) {
-	maxSteps := cfg.MaxSteps
+func (l *ReactLoop) Execute(ctx context.Context, state RunState, input EngineInput) (RunState, error) {
+	maxSteps := input.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = DefaultMaxSteps
 	}
-	toolDefinitions := indexToolDefinitions(cfg.Tools)
+	toolDefinitions := indexToolDefinitions(input.Tools)
 
 	if err := transitionRunStatus(&state, RunStatusRunning); err != nil {
 		return state, err
@@ -59,7 +53,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 
 		assistant, err := l.model.Generate(ctx, ModelRequest{
 			Messages: CloneMessages(state.Messages),
-			Tools:    cloneToolDefinitions(cfg.Tools),
+			Tools:    cloneToolDefinitions(input.Tools),
 		})
 		if err != nil {
 			if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {

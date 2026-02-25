@@ -49,7 +49,7 @@ func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {
 	runner, err := agent.NewRunner(agent.Dependencies{
 		IDGenerator: testkit.NewCounterIDGenerator("test"),
 		RunStore:    testkit.NewRunStore(),
-		ReactLoop:   loop,
+		Engine:      loop,
 		EventSink:   events,
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 	runner, err := agent.NewRunner(agent.Dependencies{
 		IDGenerator: testkit.NewCounterIDGenerator("test"),
 		RunStore:    testkit.NewRunStore(),
-		ReactLoop:   loop,
+		Engine:      loop,
 		EventSink:   testkit.NewEventSink(),
 	})
 	if err != nil {

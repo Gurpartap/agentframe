@@ -10,7 +10,7 @@ import (
 type Dependencies struct {
 	IDGenerator IDGenerator
 	RunStore    RunStore
-	ReactLoop   *ReactLoop
+	Engine      Engine
 	EventSink   EventSink
 }
 
@@ -18,7 +18,7 @@ type Dependencies struct {
 type Runner struct {
 	idGen  IDGenerator
 	store  RunStore
-	loop   *ReactLoop
+	engine Engine
 	events EventSink
 }
 
@@ -29,8 +29,8 @@ func NewRunner(deps Dependencies) (*Runner, error) {
 	if deps.RunStore == nil {
 		return nil, errors.New("run store is required")
 	}
-	if deps.ReactLoop == nil {
-		return nil, errors.New("react loop is required")
+	if deps.Engine == nil {
+		return nil, errors.New("engine is required")
 	}
 	if deps.EventSink == nil {
 		deps.EventSink = noopEventSink{}
@@ -38,7 +38,7 @@ func NewRunner(deps Dependencies) (*Runner, error) {
 	return &Runner{
 		idGen:  deps.IDGenerator,
 		store:  deps.RunStore,
-		loop:   deps.ReactLoop,
+		engine: deps.Engine,
 		events: deps.EventSink,
 	}, nil
 }
@@ -84,7 +84,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (RunResult, error) {
 		Description: "run persisted and ready for execution",
 	})
 
-	finalState, runErr := r.loop.Execute(ctx, state, ReactConfig{
+	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
 		MaxSteps: input.MaxSteps,
 		Tools:    input.Tools,
 	})
@@ -105,7 +105,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (RunResult, error) {
 	return RunResult{State: finalState}, runErr
 }
 
-// Continue loads an existing run and executes additional ReAct steps.
+// Continue loads an existing run and executes additional engine steps.
 func (r *Runner) Continue(ctx context.Context, runID RunID, maxSteps int, tools []ToolDefinition) (RunResult, error) {
 	state, err := r.store.Load(ctx, runID)
 	if err != nil {
@@ -114,7 +114,7 @@ func (r *Runner) Continue(ctx context.Context, runID RunID, maxSteps int, tools 
 	if isTerminalRunStatus(state.Status) {
 		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotContinuable, state.Status)
 	}
-	finalState, runErr := r.loop.Execute(ctx, state, ReactConfig{
+	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
 		MaxSteps: maxSteps,
 		Tools:    tools,
 	})
