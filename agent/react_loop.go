@@ -45,6 +45,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 	if maxSteps <= 0 {
 		maxSteps = DefaultMaxSteps
 	}
+	toolDefinitions := indexToolDefinitions(cfg.Tools)
 
 	if err := transitionRunStatus(&state, RunStatusRunning); err != nil {
 		return state, err
@@ -95,13 +96,31 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 		}
 
 		for _, toolCall := range assistant.ToolCalls {
-			result, toolErr := l.tools.Execute(ctx, toolCall)
-			if toolErr != nil {
-				result = ToolResult{
-					CallID:  toolCall.ID,
-					Name:    toolCall.Name,
-					Content: toolErr.Error(),
-					IsError: true,
+			definition, defined := toolDefinitions[toolCall.Name]
+			var validationErr error
+			if defined {
+				validationErr = validateToolCallArguments(toolCall, definition)
+			}
+			result := ToolResult{}
+			switch {
+			case !defined:
+				result = normalizedToolErrorResult(
+					toolCall,
+					ToolFailureReasonUnknownTool,
+					fmt.Errorf("tool %q is not defined", toolCall.Name),
+				)
+			case validationErr != nil:
+				result = normalizedToolErrorResult(
+					toolCall,
+					ToolFailureReasonInvalidArguments,
+					validationErr,
+				)
+			default:
+				executed, toolErr := l.tools.Execute(ctx, toolCall)
+				if toolErr != nil {
+					result = normalizedToolErrorResult(toolCall, ToolFailureReasonExecutorError, toolErr)
+				} else {
+					result = executed
 				}
 			}
 			if result.CallID == "" {

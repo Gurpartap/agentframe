@@ -18,11 +18,21 @@ type ToolCall struct {
 
 // ToolResult is the normalized output produced by a tool execution.
 type ToolResult struct {
-	CallID  string `json:"call_id"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
-	IsError bool   `json:"is_error,omitempty"`
+	CallID        string            `json:"call_id"`
+	Name          string            `json:"name"`
+	Content       string            `json:"content"`
+	IsError       bool              `json:"is_error,omitempty"`
+	FailureReason ToolFailureReason `json:"failure_reason,omitempty"`
 }
+
+// ToolFailureReason is a stable machine-readable classifier for tool errors.
+type ToolFailureReason string
+
+const (
+	ToolFailureReasonUnknownTool      ToolFailureReason = "unknown_tool"
+	ToolFailureReasonInvalidArguments ToolFailureReason = "invalid_arguments"
+	ToolFailureReasonExecutorError    ToolFailureReason = "executor_error"
+)
 
 // ToolResultMessage converts a tool result to a transcript message.
 func ToolResultMessage(result ToolResult) Message {
