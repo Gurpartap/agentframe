@@ -27,6 +27,8 @@ var (
 	ErrInvalidRunID = errors.New("invalid run id")
 	// ErrEventPublish is returned when runtime event emission fails.
 	ErrEventPublish = errors.New("event publish failed")
+	// ErrEngineOutputContractViolation is returned when engine output violates runtime state invariants.
+	ErrEngineOutputContractViolation = errors.New("engine output contract violation")
 	// ErrMissingIDGenerator is returned when NewRunner is called without an ID generator dependency.
 	ErrMissingIDGenerator = errors.New("missing id generator")
 	// ErrMissingRunStore is returned when NewRunner is called without a run store dependency.

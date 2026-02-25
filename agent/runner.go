@@ -67,6 +67,43 @@ func cancellationEventDescription(runErr error) string {
 	return runErr.Error()
 }
 
+func validateEngineOutput(prev RunState, next RunState) error {
+	if next.ID != prev.ID {
+		return fmt.Errorf(
+			"%w: invariant=run_id input=%q output=%q",
+			ErrEngineOutputContractViolation,
+			prev.ID,
+			next.ID,
+		)
+	}
+	if next.Step < prev.Step {
+		return fmt.Errorf(
+			"%w: invariant=step input=%d output=%d run_id=%q",
+			ErrEngineOutputContractViolation,
+			prev.Step,
+			next.Step,
+			prev.ID,
+		)
+	}
+	if len(next.Messages) < len(prev.Messages) {
+		return fmt.Errorf(
+			"%w: invariant=messages_length input=%d output=%d run_id=%q",
+			ErrEngineOutputContractViolation,
+			len(prev.Messages),
+			len(next.Messages),
+			prev.ID,
+		)
+	}
+	if !reflect.DeepEqual(next.Messages[:len(prev.Messages)], prev.Messages) {
+		return fmt.Errorf(
+			"%w: invariant=messages_prefix run_id=%q",
+			ErrEngineOutputContractViolation,
+			prev.ID,
+		)
+	}
+	return nil
+}
+
 func sideEffectContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()
@@ -202,6 +239,9 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 		MaxSteps: input.MaxSteps,
 		Tools:    input.Tools,
 	})
+	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
+		return RunResult{}, errors.Join(contractErr, eventErr)
+	}
 
 	if saveErr := r.store.Save(sideEffectCtx(), finalState); saveErr != nil {
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
@@ -258,6 +298,9 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 		Tools:    cmd.Tools,
 	})
 	var eventErr error
+	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
+		return RunResult{}, errors.Join(contractErr, eventErr)
+	}
 	if saveErr := r.store.Save(sideEffectCtx(), finalState); saveErr != nil {
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
@@ -404,6 +447,9 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 		Tools:    cmd.Tools,
 	})
 	var eventErr error
+	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
+		return RunResult{}, errors.Join(contractErr, eventErr)
+	}
 	if saveErr := r.store.Save(sideEffectCtx(), finalState); saveErr != nil {
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
