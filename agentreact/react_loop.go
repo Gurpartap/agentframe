@@ -75,7 +75,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 
 		assistant, err := l.model.Generate(ctx, ModelRequest{
 			Messages: agent.CloneMessages(state.Messages),
-			Tools:    cloneToolDefinitions(input.Tools),
+			Tools:    agent.CloneToolDefinitions(input.Tools),
 		})
 		if err != nil {
 			if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
@@ -182,39 +182,6 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 		Description: agent.ErrMaxStepsExceeded.Error(),
 	}))
 	return state, errors.Join(agent.ErrMaxStepsExceeded, eventErr)
-}
-
-func cloneToolDefinitions(in []agent.ToolDefinition) []agent.ToolDefinition {
-	out := make([]agent.ToolDefinition, len(in))
-	for i := range in {
-		out[i] = in[i]
-		if in[i].InputSchema != nil {
-			out[i].InputSchema = make(map[string]any, len(in[i].InputSchema))
-			for key, value := range in[i].InputSchema {
-				out[i].InputSchema[key] = cloneSchemaValue(value)
-			}
-		}
-	}
-	return out
-}
-
-func cloneSchemaValue(in any) any {
-	switch typed := in.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, value := range typed {
-			out[key] = cloneSchemaValue(value)
-		}
-		return out
-	case []any:
-		out := make([]any, len(typed))
-		for i := range typed {
-			out[i] = cloneSchemaValue(typed[i])
-		}
-		return out
-	default:
-		return in
-	}
 }
 
 type noopEventSink struct{}

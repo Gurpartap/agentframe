@@ -39,11 +39,19 @@ func (w *engineWrapper) Execute(ctx context.Context, state agent.RunState, input
 
 	attempts := normalizedAttempts(w.cfg.MaxAttempts)
 	baseState := agent.CloneRunState(state)
+	baseInput := agent.EngineInput{
+		MaxSteps: input.MaxSteps,
+		Tools:    agent.CloneToolDefinitions(input.Tools),
+	}
 	lastState := baseState
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
 		attemptState := agent.CloneRunState(baseState)
-		nextState, err := w.next.Execute(ctx, attemptState, input)
+		attemptInput := agent.EngineInput{
+			MaxSteps: baseInput.MaxSteps,
+			Tools:    agent.CloneToolDefinitions(baseInput.Tools),
+		}
+		nextState, err := w.next.Execute(ctx, attemptState, attemptInput)
 		if err == nil {
 			return nextState, nil
 		}

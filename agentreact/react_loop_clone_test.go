@@ -1,94 +1,106 @@
 package agentreact
 
 import (
+	"context"
+	"reflect"
 	"testing"
 
 	"agentruntime/agent"
 )
 
-func TestCloneToolDefinitions_DeepCopiesNestedInputSchema(t *testing.T) {
+func TestReactLoopExecute_ClonesToolDefinitionsForModelRequests(t *testing.T) {
 	t.Parallel()
 
-	original := []agent.ToolDefinition{
+	inputTools := []agent.ToolDefinition{
 		{
 			Name: "lookup",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"filters": map[string]any{
-						"type": "array",
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"tags": map[string]any{
-									"type":  "array",
-									"items": []any{"alpha", map[string]any{"kind": "string"}},
-								},
-							},
-						},
+					"query": map[string]any{
+						"type": "string",
+						"enum": []any{"alpha", "beta"},
 					},
 				},
 				"required": []any{"query"},
 			},
 		},
 	}
+	wantTools := agent.CloneToolDefinitions(inputTools)
 
-	cloned := cloneToolDefinitions(original)
-
-	clonedSchema := mustSchemaMap(t, cloned[0].InputSchema)
-	clonedSchema["type"] = "array"
-	clonedProperties := mustSchemaMap(t, clonedSchema["properties"])
-	clonedFilters := mustSchemaMap(t, clonedProperties["filters"])
-	clonedItems := mustSchemaMap(t, clonedFilters["items"])
-	clonedItemsProperties := mustSchemaMap(t, clonedItems["properties"])
-	clonedTags := mustSchemaMap(t, clonedItemsProperties["tags"])
-	clonedTagItems := mustSchemaSlice(t, clonedTags["items"])
-	clonedTagItems[0] = "cloned-alpha"
-	mustSchemaMap(t, clonedTagItems[1])["kind"] = "number"
-	clonedRequired := mustSchemaSlice(t, clonedSchema["required"])
-	clonedRequired[0] = "cloned-required"
-
-	originalSchema := mustSchemaMap(t, original[0].InputSchema)
-	if originalSchema["type"] != "object" {
-		t.Fatalf("clone mutation leaked into original schema type: %v", originalSchema["type"])
+	model := &mutatingModel{
+		t:         t,
+		wantTools: wantTools,
 	}
-	originalProperties := mustSchemaMap(t, originalSchema["properties"])
-	originalFilters := mustSchemaMap(t, originalProperties["filters"])
-	originalItems := mustSchemaMap(t, originalFilters["items"])
-	originalItemsProperties := mustSchemaMap(t, originalItems["properties"])
-	originalTags := mustSchemaMap(t, originalItemsProperties["tags"])
-	originalTagItems := mustSchemaSlice(t, originalTags["items"])
-	if originalTagItems[0] != "alpha" {
-		t.Fatalf("clone mutation leaked into original nested slice: %v", originalTagItems[0])
-	}
-	if mustSchemaMap(t, originalTagItems[1])["kind"] != "string" {
-		t.Fatalf("clone mutation leaked into original nested map: %v", mustSchemaMap(t, originalTagItems[1])["kind"])
-	}
-	originalRequired := mustSchemaSlice(t, originalSchema["required"])
-	if originalRequired[0] != "query" {
-		t.Fatalf("clone mutation leaked into original required: %v", originalRequired[0])
+	loop, err := New(model, noopToolExecutor{}, nil)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
 	}
 
-	originalSchema["type"] = "original-type"
-	originalTagItems[0] = "original-alpha"
-	mustSchemaMap(t, originalTagItems[1])["kind"] = "boolean"
-	originalRequired[0] = "original-required"
-
-	if clonedSchema["type"] != "array" {
-		t.Fatalf("original mutation leaked into cloned schema type: %v", clonedSchema["type"])
+	state := agent.RunState{
+		ID:     "react-loop-clone-tools",
+		Status: agent.RunStatusPending,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "hello"},
+		},
 	}
-	if clonedTagItems[0] != "cloned-alpha" {
-		t.Fatalf("original mutation leaked into cloned nested slice: %v", clonedTagItems[0])
+	result, execErr := loop.Execute(context.Background(), state, agent.EngineInput{
+		MaxSteps: 2,
+		Tools:    inputTools,
+	})
+	if execErr != nil {
+		t.Fatalf("execute returned error: %v", execErr)
 	}
-	if mustSchemaMap(t, clonedTagItems[1])["kind"] != "number" {
-		t.Fatalf("original mutation leaked into cloned nested map: %v", mustSchemaMap(t, clonedTagItems[1])["kind"])
+	if model.calls != 1 {
+		t.Fatalf("unexpected model calls: %d", model.calls)
 	}
-	if clonedRequired[0] != "cloned-required" {
-		t.Fatalf("original mutation leaked into cloned required: %v", clonedRequired[0])
+	if result.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected status: %s", result.Status)
+	}
+	if result.Output != "done" {
+		t.Fatalf("unexpected output: %q", result.Output)
+	}
+	if !reflect.DeepEqual(inputTools, wantTools) {
+		t.Fatalf("input tools mutated by model-boundary request: got=%+v want=%+v", inputTools, wantTools)
 	}
 }
 
-func mustSchemaMap(t *testing.T, value any) map[string]any {
+type mutatingModel struct {
+	t         *testing.T
+	calls     int
+	wantTools []agent.ToolDefinition
+}
+
+func (m *mutatingModel) Generate(_ context.Context, request ModelRequest) (agent.Message, error) {
+	m.calls++
+	if !reflect.DeepEqual(request.Tools, m.wantTools) {
+		m.t.Fatalf("model received unexpected tool definitions: got=%+v want=%+v", request.Tools, m.wantTools)
+	}
+
+	request.Tools[0].Name = "mutated"
+	request.Tools[0].InputSchema["type"] = "array"
+	request.Tools[0].InputSchema["added"] = map[string]any{"flag": true}
+	properties := mustReactToolMap(m.t, request.Tools[0].InputSchema["properties"])
+	query := mustReactToolMap(m.t, properties["query"])
+	enum := mustReactToolSlice(m.t, query["enum"])
+	enum[0] = "mutated-alpha"
+	query["extra"] = "x"
+	required := mustReactToolSlice(m.t, request.Tools[0].InputSchema["required"])
+	required[0] = "changed-required"
+
+	return agent.Message{
+		Role:    agent.RoleAssistant,
+		Content: "done",
+	}, nil
+}
+
+type noopToolExecutor struct{}
+
+func (noopToolExecutor) Execute(context.Context, agent.ToolCall) (agent.ToolResult, error) {
+	return agent.ToolResult{}, nil
+}
+
+func mustReactToolMap(t *testing.T, value any) map[string]any {
 	t.Helper()
 
 	m, ok := value.(map[string]any)
@@ -98,7 +110,7 @@ func mustSchemaMap(t *testing.T, value any) map[string]any {
 	return m
 }
 
-func mustSchemaSlice(t *testing.T, value any) []any {
+func mustReactToolSlice(t *testing.T, value any) []any {
 	t.Helper()
 
 	s, ok := value.([]any)

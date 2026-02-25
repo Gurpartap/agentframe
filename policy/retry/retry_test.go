@@ -221,3 +221,93 @@ func TestWrapEngine_NilContextStopsWithoutAttempt(t *testing.T) {
 		t.Fatalf("state changed for nil context: got=%+v want=%+v", gotState, initial)
 	}
 }
+
+func TestWrapEngine_RetryAttemptsUseStableToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	callerTools := []agent.ToolDefinition{
+		{
+			Name: "lookup",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type": "string",
+						"enum": []any{"alpha", "beta"},
+					},
+				},
+				"required": []any{"query"},
+			},
+		},
+	}
+	wantTools := agent.CloneToolDefinitions(callerTools)
+
+	engine := engineFunc(func(_ context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
+		attempts++
+		if !reflect.DeepEqual(input.Tools, wantTools) {
+			t.Fatalf("attempt %d received unstable tool definitions: got=%+v want=%+v", attempts, input.Tools, wantTools)
+		}
+
+		input.Tools[0].Name = "mutated"
+		input.Tools[0].InputSchema["type"] = "array"
+		input.Tools[0].InputSchema["added"] = map[string]any{"flag": true}
+		properties := mustRetryToolMap(t, input.Tools[0].InputSchema["properties"])
+		query := mustRetryToolMap(t, properties["query"])
+		enum := mustRetryToolSlice(t, query["enum"])
+		enum[0] = "mutated-alpha"
+		query["extra"] = "x"
+		required := mustRetryToolSlice(t, input.Tools[0].InputSchema["required"])
+		required[0] = "changed-required"
+
+		if attempts < 3 {
+			return state, errors.New("retry")
+		}
+		next := state
+		next.Status = agent.RunStatusCompleted
+		return next, nil
+	})
+	wrapped := WrapEngine(engine, Config{MaxAttempts: 3})
+
+	input := agent.EngineInput{
+		MaxSteps: 3,
+		Tools:    callerTools,
+	}
+	initialState := agent.RunState{
+		ID:     "run-stable-tools",
+		Status: agent.RunStatusRunning,
+	}
+	gotState, err := wrapped.Execute(context.Background(), initialState, input)
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("unexpected attempts: %d", attempts)
+	}
+	if gotState.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected status: %s", gotState.Status)
+	}
+	if !reflect.DeepEqual(callerTools, wantTools) {
+		t.Fatalf("caller tools mutated by retries: got=%+v want=%+v", callerTools, wantTools)
+	}
+}
+
+func mustRetryToolMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+
+	m, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map[string]any, got %T", value)
+	}
+	return m
+}
+
+func mustRetryToolSlice(t *testing.T, value any) []any {
+	t.Helper()
+
+	s, ok := value.([]any)
+	if !ok {
+		t.Fatalf("expected []any, got %T", value)
+	}
+	return s
+}

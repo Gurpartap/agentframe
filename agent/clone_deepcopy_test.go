@@ -139,6 +139,79 @@ func TestCloneMessageAndRunState_DeepCopyNestedToolArguments(t *testing.T) {
 	}
 }
 
+func TestCloneToolDefinitions_DeepCopiesNestedInputSchema(t *testing.T) {
+	t.Parallel()
+
+	original := []agent.ToolDefinition{
+		{
+			Name: "lookup",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type": "string",
+						"enum": []any{"alpha", "beta"},
+					},
+				},
+				"required": []any{"query"},
+			},
+		},
+	}
+	cloned := agent.CloneToolDefinitions(original)
+
+	cloned[0].Name = "mutated"
+	cloned[0].InputSchema["type"] = "array"
+	cloned[0].InputSchema["added"] = map[string]any{"flag": true}
+	clonedProperties := mustMap(t, cloned[0].InputSchema["properties"])
+	clonedQuery := mustMap(t, clonedProperties["query"])
+	clonedEnum := mustSlice(t, clonedQuery["enum"])
+	clonedEnum[0] = "mutated-alpha"
+	clonedQuery["extra"] = "x"
+	clonedRequired := mustSlice(t, cloned[0].InputSchema["required"])
+	clonedRequired[0] = "changed-required"
+
+	if original[0].Name != "lookup" {
+		t.Fatalf("clone mutation leaked into original name: %q", original[0].Name)
+	}
+	if original[0].InputSchema["type"] != "object" {
+		t.Fatalf("clone mutation leaked into original schema type: %v", original[0].InputSchema["type"])
+	}
+	if _, ok := original[0].InputSchema["added"]; ok {
+		t.Fatalf("clone mutation leaked into original schema map")
+	}
+	originalProperties := mustMap(t, original[0].InputSchema["properties"])
+	originalQuery := mustMap(t, originalProperties["query"])
+	originalEnum := mustSlice(t, originalQuery["enum"])
+	if originalEnum[0] != "alpha" {
+		t.Fatalf("clone mutation leaked into original nested slice: %v", originalEnum[0])
+	}
+	if _, ok := originalQuery["extra"]; ok {
+		t.Fatalf("clone mutation leaked into original nested map")
+	}
+	originalRequired := mustSlice(t, original[0].InputSchema["required"])
+	if originalRequired[0] != "query" {
+		t.Fatalf("clone mutation leaked into original required: %v", originalRequired[0])
+	}
+
+	original[0].Name = "original-mutated"
+	original[0].InputSchema["type"] = "object-mutated"
+	originalEnum[0] = "original-alpha"
+	originalRequired[0] = "original-required"
+
+	if cloned[0].Name != "mutated" {
+		t.Fatalf("original mutation leaked into cloned name: %q", cloned[0].Name)
+	}
+	if cloned[0].InputSchema["type"] != "array" {
+		t.Fatalf("original mutation leaked into cloned schema type: %v", cloned[0].InputSchema["type"])
+	}
+	if clonedEnum[0] != "mutated-alpha" {
+		t.Fatalf("original mutation leaked into cloned nested slice: %v", clonedEnum[0])
+	}
+	if clonedRequired[0] != "changed-required" {
+		t.Fatalf("original mutation leaked into cloned required: %v", clonedRequired[0])
+	}
+}
+
 func mustMap(t *testing.T, value any) map[string]any {
 	t.Helper()
 

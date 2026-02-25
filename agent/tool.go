@@ -23,6 +23,27 @@ type ToolResult struct {
 	FailureReason ToolFailureReason `json:"failure_reason,omitempty"`
 }
 
+// CloneToolDefinition returns a deep copy of a tool definition.
+func CloneToolDefinition(in ToolDefinition) ToolDefinition {
+	out := in
+	if in.InputSchema != nil {
+		out.InputSchema = make(map[string]any, len(in.InputSchema))
+		for key, value := range in.InputSchema {
+			out.InputSchema[key] = cloneJSONLikeValue(value)
+		}
+	}
+	return out
+}
+
+// CloneToolDefinitions returns deep copies of all tool definitions.
+func CloneToolDefinitions(in []ToolDefinition) []ToolDefinition {
+	out := make([]ToolDefinition, len(in))
+	for i := range in {
+		out[i] = CloneToolDefinition(in[i])
+	}
+	return out
+}
+
 // ToolFailureReason is a stable machine-readable classifier for tool errors.
 type ToolFailureReason string
 

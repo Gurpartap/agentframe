@@ -210,7 +210,7 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 
 	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
 		MaxSteps: input.MaxSteps,
-		Tools:    input.Tools,
+		Tools:    CloneToolDefinitions(input.Tools),
 	})
 	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
 		return RunResult{}, errors.Join(contractErr, eventErr)
@@ -268,7 +268,7 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 	}
 	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
 		MaxSteps: cmd.MaxSteps,
-		Tools:    cmd.Tools,
+		Tools:    CloneToolDefinitions(cmd.Tools),
 	})
 	var eventErr error
 	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
@@ -417,7 +417,7 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 	})
 	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
 		MaxSteps: cmd.MaxSteps,
-		Tools:    cmd.Tools,
+		Tools:    CloneToolDefinitions(cmd.Tools),
 	})
 	var eventErr error
 	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
