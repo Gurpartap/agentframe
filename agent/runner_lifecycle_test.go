@@ -200,6 +200,116 @@ func TestRunnerContinue_TerminalStatesRejected(t *testing.T) {
 	}
 }
 
+func TestRunnerRun_PreCancelledContext(t *testing.T) {
+	t.Parallel()
+
+	store := testkit.NewRunStore()
+	events := testkit.NewEventSink()
+	runner := newLifecycleRunner(t, store, events)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := runner.Run(ctx, agent.RunInput{
+		UserPrompt: "hello",
+		MaxSteps:   3,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if result.State.Status != agent.RunStatusCancelled {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.Error != context.Canceled.Error() {
+		t.Fatalf("unexpected error text: %q", result.State.Error)
+	}
+	if result.State.Step != 0 {
+		t.Fatalf("unexpected step: %d", result.State.Step)
+	}
+	if result.State.Version != 2 {
+		t.Fatalf("unexpected version: %d", result.State.Version)
+	}
+	if len(result.State.Messages) != 1 || result.State.Messages[0].Role != agent.RoleUser {
+		t.Fatalf("unexpected transcript: %+v", result.State.Messages)
+	}
+
+	gotEvents := events.Events()
+	if len(gotEvents) != 3 {
+		t.Fatalf("unexpected event count: %d", len(gotEvents))
+	}
+	if gotEvents[0].Type != agent.EventTypeRunStarted {
+		t.Fatalf("unexpected first event type: %s", gotEvents[0].Type)
+	}
+	if gotEvents[1].Type != agent.EventTypeRunCancelled {
+		t.Fatalf("unexpected second event type: %s", gotEvents[1].Type)
+	}
+	if gotEvents[2].Type != agent.EventTypeRunCheckpoint {
+		t.Fatalf("unexpected third event type: %s", gotEvents[2].Type)
+	}
+	if gotEvents[1].Description != context.Canceled.Error() {
+		t.Fatalf("unexpected cancelled event description: %q", gotEvents[1].Description)
+	}
+}
+
+func TestRunnerContinue_CancelledContext(t *testing.T) {
+	t.Parallel()
+
+	store := testkit.NewRunStore()
+	events := testkit.NewEventSink()
+	runner := newLifecycleRunner(t, store, events)
+
+	initial := agent.RunState{
+		ID:     agent.RunID("run-continue-cancelled-context"),
+		Status: agent.RunStatusPending,
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+	persistedInitial, err := store.Load(context.Background(), initial.ID)
+	if err != nil {
+		t.Fatalf("load initial state: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := runner.Continue(ctx, initial.ID, 3, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if result.State.Status != agent.RunStatusCancelled {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.Error != context.Canceled.Error() {
+		t.Fatalf("unexpected error text: %q", result.State.Error)
+	}
+	if result.State.Step != persistedInitial.Step {
+		t.Fatalf("unexpected step: got=%d want=%d", result.State.Step, persistedInitial.Step)
+	}
+	if result.State.Version != persistedInitial.Version+1 {
+		t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version+1)
+	}
+
+	loaded, err := store.Load(context.Background(), initial.ID)
+	if err != nil {
+		t.Fatalf("load continued state: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, result.State) {
+		t.Fatalf("saved state mismatch: got=%+v want=%+v", loaded, result.State)
+	}
+
+	gotEvents := events.Events()
+	if len(gotEvents) != 2 {
+		t.Fatalf("unexpected event count: %d", len(gotEvents))
+	}
+	if gotEvents[0].Type != agent.EventTypeRunCancelled {
+		t.Fatalf("unexpected first event type: %s", gotEvents[0].Type)
+	}
+	if gotEvents[1].Type != agent.EventTypeRunCheckpoint {
+		t.Fatalf("unexpected second event type: %s", gotEvents[1].Type)
+	}
+}
+
 func newLifecycleRunner(t *testing.T, store *testkit.RunStore, events *testkit.EventSink) *agent.Runner {
 	t.Helper()
 

@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"errors"
 
 	"agentruntime/agent"
 )
@@ -29,6 +30,10 @@ type modelWrapper struct {
 }
 
 func (w *modelWrapper) Generate(ctx context.Context, request agent.ModelRequest) (agent.Message, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return agent.Message{}, ctxErr
+	}
+
 	attempts := normalizedAttempts(w.cfg.MaxAttempts)
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
@@ -37,7 +42,7 @@ func (w *modelWrapper) Generate(ctx context.Context, request agent.ModelRequest)
 			return msg, nil
 		}
 		lastErr = err
-		if attempt == attempts || !shouldRetry(w.cfg, err) {
+		if attempt == attempts || !shouldRetry(ctx, w.cfg, err) {
 			break
 		}
 	}
@@ -61,6 +66,10 @@ type toolExecutorWrapper struct {
 }
 
 func (w *toolExecutorWrapper) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return agent.ToolResult{}, ctxErr
+	}
+
 	attempts := normalizedAttempts(w.cfg.MaxAttempts)
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
@@ -69,7 +78,7 @@ func (w *toolExecutorWrapper) Execute(ctx context.Context, call agent.ToolCall) 
 			return result, nil
 		}
 		lastErr = err
-		if attempt == attempts || !shouldRetry(w.cfg, err) {
+		if attempt == attempts || !shouldRetry(ctx, w.cfg, err) {
 			break
 		}
 	}
@@ -83,8 +92,14 @@ func normalizedAttempts(maxAttempts int) int {
 	return maxAttempts
 }
 
-func shouldRetry(cfg Config, err error) bool {
+func shouldRetry(ctx context.Context, cfg Config, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	if cfg.ShouldRetry == nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false
+		}
 		return true
 	}
 	return cfg.ShouldRetry(err)

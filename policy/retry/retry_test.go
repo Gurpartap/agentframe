@@ -164,3 +164,115 @@ func TestWrapToolExecutor_ShouldRetryFalseStopsAfterFirstError(t *testing.T) {
 		t.Fatalf("unexpected attempts: %d", attempts)
 	}
 }
+
+func TestWrapModel_ContextErrorsDoNotRetryByDefault(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "canceled", err: context.Canceled},
+		{name: "deadline_exceeded", err: context.DeadlineExceeded},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			attempts := 0
+			model := modelFunc(func(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
+				attempts++
+				return agent.Message{}, tc.err
+			})
+			wrapped := WrapModel(model, Config{MaxAttempts: 5})
+
+			_, err := wrapped.Generate(context.Background(), agent.ModelRequest{})
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("expected %v, got %v", tc.err, err)
+			}
+			if attempts != 1 {
+				t.Fatalf("unexpected attempts: %d", attempts)
+			}
+		})
+	}
+}
+
+func TestWrapToolExecutor_ContextErrorsDoNotRetryByDefault(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "canceled", err: context.Canceled},
+		{name: "deadline_exceeded", err: context.DeadlineExceeded},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			attempts := 0
+			executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
+				attempts++
+				return agent.ToolResult{}, tc.err
+			})
+			wrapped := WrapToolExecutor(executor, Config{MaxAttempts: 5})
+
+			_, err := wrapped.Execute(context.Background(), agent.ToolCall{ID: "call-1", Name: "lookup"})
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("expected %v, got %v", tc.err, err)
+			}
+			if attempts != 1 {
+				t.Fatalf("unexpected attempts: %d", attempts)
+			}
+		})
+	}
+}
+
+func TestWrapModel_ContextDoneStopsWithoutAttempt(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	model := modelFunc(func(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
+		attempts++
+		return agent.Message{}, errors.New("unexpected call")
+	})
+	wrapped := WrapModel(model, Config{MaxAttempts: 5})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := wrapped.Generate(ctx, agent.ModelRequest{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if attempts != 0 {
+		t.Fatalf("unexpected attempts: %d", attempts)
+	}
+}
+
+func TestWrapToolExecutor_ContextDoneStopsWithoutAttempt(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
+		attempts++
+		return agent.ToolResult{}, errors.New("unexpected call")
+	})
+	wrapped := WrapToolExecutor(executor, Config{MaxAttempts: 5})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := wrapped.Execute(ctx, agent.ToolCall{ID: "call-1", Name: "lookup"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if attempts != 0 {
+		t.Fatalf("unexpected attempts: %d", attempts)
+	}
+}

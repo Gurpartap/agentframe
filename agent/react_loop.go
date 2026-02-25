@@ -51,6 +51,10 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 		return state, err
 	}
 	for state.Step < maxSteps {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return l.cancelRun(ctx, state, ctxErr)
+		}
+
 		state.Step++
 
 		assistant, err := l.model.Generate(ctx, ModelRequest{
@@ -58,6 +62,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 			Tools:    cloneToolDefinitions(cfg.Tools),
 		})
 		if err != nil {
+			if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
+				return l.cancelRun(ctx, state, cancellationErr)
+			}
 			if transitionErr := transitionRunStatus(&state, RunStatusFailed); transitionErr != nil {
 				return state, errors.Join(err, transitionErr)
 			}
@@ -96,6 +103,10 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 		}
 
 		for _, toolCall := range assistant.ToolCalls {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return l.cancelRun(ctx, state, ctxErr)
+			}
+
 			definition, defined := toolDefinitions[toolCall.Name]
 			var validationErr error
 			if defined {
@@ -118,6 +129,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 			default:
 				executed, toolErr := l.tools.Execute(ctx, toolCall)
 				if toolErr != nil {
+					if cancellationErr := contextCancellationError(ctx, toolErr); cancellationErr != nil {
+						return l.cancelRun(ctx, state, cancellationErr)
+					}
 					result = normalizedToolErrorResult(toolCall, ToolFailureReasonExecutorError, toolErr)
 				} else {
 					result = executed
@@ -170,4 +184,35 @@ type noopEventSink struct{}
 
 func (noopEventSink) Publish(context.Context, Event) error {
 	return nil
+}
+
+func contextCancellationError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		return context.Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func (l *ReactLoop) cancelRun(ctx context.Context, state RunState, runErr error) (RunState, error) {
+	if runErr == nil {
+		runErr = context.Canceled
+	}
+	if transitionErr := transitionRunStatus(&state, RunStatusCancelled); transitionErr != nil {
+		return state, errors.Join(runErr, transitionErr)
+	}
+	state.Error = runErr.Error()
+	_ = l.events.Publish(ctx, Event{
+		RunID:       state.ID,
+		Step:        state.Step,
+		Type:        EventTypeRunCancelled,
+		Description: runErr.Error(),
+	})
+	return state, runErr
 }
