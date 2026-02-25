@@ -39,6 +39,9 @@ func (r *Registry) Register(name string, handler Handler) {
 }
 
 func (r *Registry) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return agent.ToolResult{}, ctxErr
+	}
 	if call.Name == "" {
 		return agent.ToolResult{}, fmt.Errorf("%w: call %q", ErrToolNameEmpty, call.ID)
 	}

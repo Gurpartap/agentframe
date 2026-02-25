@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"agentruntime/agent"
 	toolingregistry "agentruntime/tooling/registry"
@@ -171,5 +172,57 @@ func TestRegistryExecute_PropagatesHandlerError(t *testing.T) {
 	_, err := registry.Execute(context.Background(), agent.ToolCall{ID: "call-9", Name: "fail"})
 	if !errors.Is(err, expected) {
 		t.Fatalf("expected propagated error, got %v", err)
+	}
+}
+
+func TestRegistryExecute_ContextCanceledFailsFastWithoutHandlerInvocation(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	registry := toolingregistry.New(map[string]toolingregistry.Handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			called = true
+			return "unexpected", nil
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := registry.Execute(ctx, agent.ToolCall{ID: "call-canceled", Name: "lookup"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if result != (agent.ToolResult{}) {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if called {
+		t.Fatalf("handler must not be invoked when context is canceled")
+	}
+}
+
+func TestRegistryExecute_ContextDeadlineExceededFailsFastWithoutHandlerInvocation(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	registry := toolingregistry.New(map[string]toolingregistry.Handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			called = true
+			return "unexpected", nil
+		},
+	})
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	result, err := registry.Execute(ctx, agent.ToolCall{ID: "call-timeout", Name: "lookup"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+	}
+	if result != (agent.ToolResult{}) {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if called {
+		t.Fatalf("handler must not be invoked when context deadline is exceeded")
 	}
 }
