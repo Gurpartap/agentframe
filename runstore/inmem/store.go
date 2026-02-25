@@ -2,7 +2,6 @@ package inmem
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -68,10 +67,7 @@ func (s *Store) Load(ctx context.Context, runID agent.RunID) (agent.RunState, er
 		return agent.RunState{}, ctxErr
 	}
 	if runID == "" {
-		return agent.RunState{}, errors.Join(
-			fmt.Errorf("%w: load with empty id", agent.ErrInvalidRunID),
-			agent.ErrRunNotFound,
-		)
+		return agent.RunState{}, fmt.Errorf("%w: load with empty id", agent.ErrInvalidRunID)
 	}
 
 	s.mu.RLock()

@@ -83,6 +83,9 @@ func TestStore_LoadRejectsEmptyRunID(t *testing.T) {
 	if !errors.Is(err, agent.ErrInvalidRunID) {
 		t.Fatalf("expected ErrInvalidRunID, got %v", err)
 	}
+	if errors.Is(err, agent.ErrRunNotFound) {
+		t.Fatalf("expected empty-id load not to match ErrRunNotFound, got %v", err)
+	}
 }
 
 func TestStore_SaveFailsFastOnDoneContext(t *testing.T) {

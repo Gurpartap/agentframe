@@ -196,8 +196,8 @@ func TestRunnerRun_RejectsEmptyGeneratedRunID(t *testing.T) {
 	if gotEvents := events.Events(); len(gotEvents) != 0 {
 		t.Fatalf("unexpected events emitted: %d", len(gotEvents))
 	}
-	if _, loadErr := store.Load(context.Background(), ""); !errors.Is(loadErr, agent.ErrRunNotFound) {
-		t.Fatalf("expected ErrRunNotFound for empty run id persistence check, got %v", loadErr)
+	if _, loadErr := store.Load(context.Background(), ""); !errors.Is(loadErr, agent.ErrInvalidRunID) {
+		t.Fatalf("expected ErrInvalidRunID for empty run id persistence check, got %v", loadErr)
 	}
 }
 
