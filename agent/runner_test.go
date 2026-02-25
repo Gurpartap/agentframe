@@ -5,17 +5,15 @@ import (
 	"errors"
 	"testing"
 
-	"agentruntime/adapters/inmem"
-	"agentruntime/adapters/modeltest"
-	"agentruntime/adapters/tools"
 	"agentruntime/agent"
+	"agentruntime/agent/internal/testkit"
 )
 
 func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {
 	t.Parallel()
 
-	model := modeltest.NewScriptedModel(
-		modeltest.Response{
+	model := testkit.NewScriptedModel(
+		testkit.Response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "I should call a tool first.",
@@ -30,27 +28,27 @@ func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {
 				},
 			},
 		},
-		modeltest.Response{
+		testkit.Response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Final answer after tool observation.",
 			},
 		},
 	)
-	registry := tools.NewRegistry(map[string]tools.Handler{
+	registry := testkit.NewRegistry(map[string]testkit.Handler{
 		"lookup": func(_ context.Context, args map[string]any) (string, error) {
 			return "tool_result_for=" + args["q"].(string), nil
 		},
 	})
-	events := inmem.NewEventSink()
+	events := testkit.NewEventSink()
 	loop, err := agent.NewReactLoop(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
 
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: inmem.NewCounterIDGenerator("test"),
-		RunStore:    inmem.NewRunStore(),
+		IDGenerator: testkit.NewCounterIDGenerator("test"),
+		RunStore:    testkit.NewRunStore(),
 		ReactLoop:   loop,
 		EventSink:   events,
 	})
@@ -83,8 +81,8 @@ func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {
 func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 	t.Parallel()
 
-	model := modeltest.NewScriptedModel(
-		modeltest.Response{
+	model := testkit.NewScriptedModel(
+		testkit.Response{
 			Message: agent.Message{
 				Role:    agent.RoleAssistant,
 				Content: "Need tool.",
@@ -97,20 +95,20 @@ func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 			},
 		},
 	)
-	registry := tools.NewRegistry(map[string]tools.Handler{
+	registry := testkit.NewRegistry(map[string]testkit.Handler{
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			return "value", nil
 		},
 	})
-	loop, err := agent.NewReactLoop(model, registry, inmem.NewEventSink())
+	loop, err := agent.NewReactLoop(model, registry, testkit.NewEventSink())
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		IDGenerator: inmem.NewCounterIDGenerator("test"),
-		RunStore:    inmem.NewRunStore(),
+		IDGenerator: testkit.NewCounterIDGenerator("test"),
+		RunStore:    testkit.NewRunStore(),
 		ReactLoop:   loop,
-		EventSink:   inmem.NewEventSink(),
+		EventSink:   testkit.NewEventSink(),
 	})
 	if err != nil {
 		t.Fatalf("new runner: %v", err)
