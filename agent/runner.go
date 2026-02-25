@@ -43,8 +43,49 @@ func NewRunner(deps Dependencies) (*Runner, error) {
 	}, nil
 }
 
+// Dispatch executes a typed command against the run store.
+func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
+	switch command := cmd.(type) {
+	case nil:
+		return RunResult{}, ErrCommandNil
+	case StartCommand:
+		return r.dispatchStart(ctx, command)
+	case *StartCommand:
+		if command == nil {
+			return RunResult{}, ErrCommandNil
+		}
+		return r.dispatchStart(ctx, *command)
+	case ContinueCommand:
+		return r.dispatchContinue(ctx, command)
+	case *ContinueCommand:
+		if command == nil {
+			return RunResult{}, ErrCommandNil
+		}
+		return r.dispatchContinue(ctx, *command)
+	case CancelCommand:
+		return r.dispatchCancel(ctx, command)
+	case *CancelCommand:
+		if command == nil {
+			return RunResult{}, ErrCommandNil
+		}
+		return r.dispatchCancel(ctx, *command)
+	default:
+		switch kind := cmd.Kind(); kind {
+		case CommandKindStart, CommandKindContinue, CommandKindCancel:
+			return RunResult{}, fmt.Errorf("%w: kind=%s payload=%T", ErrCommandInvalid, kind, cmd)
+		default:
+			return RunResult{}, fmt.Errorf("%w: %s", ErrCommandUnsupported, kind)
+		}
+	}
+}
+
 // Run executes a new run from prompts and returns final state.
 func (r *Runner) Run(ctx context.Context, input RunInput) (RunResult, error) {
+	return r.Dispatch(ctx, StartCommand{Input: input})
+}
+
+func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult, error) {
+	input := cmd.Input
 	runID := input.RunID
 	if runID == "" {
 		generated, err := r.idGen.NewRunID(ctx)
@@ -107,6 +148,15 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (RunResult, error) {
 
 // Continue loads an existing run and executes additional engine steps.
 func (r *Runner) Continue(ctx context.Context, runID RunID, maxSteps int, tools []ToolDefinition) (RunResult, error) {
+	return r.Dispatch(ctx, ContinueCommand{
+		RunID:    runID,
+		MaxSteps: maxSteps,
+		Tools:    tools,
+	})
+}
+
+func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (RunResult, error) {
+	runID := cmd.RunID
 	state, err := r.store.Load(ctx, runID)
 	if err != nil {
 		return RunResult{}, err
@@ -115,8 +165,8 @@ func (r *Runner) Continue(ctx context.Context, runID RunID, maxSteps int, tools 
 		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotContinuable, state.Status)
 	}
 	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
-		MaxSteps: maxSteps,
-		Tools:    tools,
+		MaxSteps: cmd.MaxSteps,
+		Tools:    cmd.Tools,
 	})
 	if saveErr := r.store.Save(ctx, finalState); saveErr != nil {
 		if runErr != nil {
@@ -136,6 +186,11 @@ func (r *Runner) Continue(ctx context.Context, runID RunID, maxSteps int, tools 
 
 // Cancel marks a non-terminal run as cancelled and persists the cancellation state.
 func (r *Runner) Cancel(ctx context.Context, runID RunID) (RunResult, error) {
+	return r.Dispatch(ctx, CancelCommand{RunID: runID})
+}
+
+func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResult, error) {
+	runID := cmd.RunID
 	state, err := r.store.Load(ctx, runID)
 	if err != nil {
 		return RunResult{}, err

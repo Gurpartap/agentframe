@@ -15,4 +15,10 @@ var (
 	ErrRunNotContinuable = errors.New("run is not continuable")
 	// ErrRunNotCancellable is returned when cancel is requested for a terminal run.
 	ErrRunNotCancellable = errors.New("run is not cancellable")
+	// ErrCommandNil is returned when dispatch is called with a nil command.
+	ErrCommandNil = errors.New("command is nil")
+	// ErrCommandInvalid is returned when command kind and payload type are inconsistent.
+	ErrCommandInvalid = errors.New("command is invalid")
+	// ErrCommandUnsupported is returned when command kind has no runtime handler.
+	ErrCommandUnsupported = errors.New("command is unsupported")
 )
