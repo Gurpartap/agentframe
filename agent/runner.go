@@ -25,13 +25,13 @@ type Runner struct {
 
 func NewRunner(deps Dependencies) (*Runner, error) {
 	if deps.IDGenerator == nil {
-		return nil, errors.New("id generator is required")
+		return nil, fmt.Errorf("new runner: %w", ErrMissingIDGenerator)
 	}
 	if deps.RunStore == nil {
-		return nil, errors.New("run store is required")
+		return nil, fmt.Errorf("new runner: %w", ErrMissingRunStore)
 	}
 	if deps.Engine == nil {
-		return nil, errors.New("engine is required")
+		return nil, fmt.Errorf("new runner: %w", ErrMissingEngine)
 	}
 	if deps.EventSink == nil {
 		deps.EventSink = noopEventSink{}

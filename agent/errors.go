@@ -23,4 +23,10 @@ var (
 	ErrCommandUnsupported = errors.New("command is unsupported")
 	// ErrEventPublish is returned when runtime event emission fails.
 	ErrEventPublish = errors.New("event publish failed")
+	// ErrMissingIDGenerator is returned when NewRunner is called without an ID generator dependency.
+	ErrMissingIDGenerator = errors.New("missing id generator")
+	// ErrMissingRunStore is returned when NewRunner is called without a run store dependency.
+	ErrMissingRunStore = errors.New("missing run store")
+	// ErrMissingEngine is returned when NewRunner is called without an engine dependency.
+	ErrMissingEngine = errors.New("missing engine")
 )
