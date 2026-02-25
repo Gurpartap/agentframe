@@ -81,17 +81,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 			if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
 				return l.cancelRun(ctx, state, cancellationErr, eventErr)
 			}
-			if transitionErr := agent.TransitionRunStatus(&state, agent.RunStatusFailed); transitionErr != nil {
-				return state, errors.Join(err, transitionErr, eventErr)
-			}
-			state.Error = err.Error()
-			eventErr = errors.Join(eventErr, publishEvent(ctx, l.events, agent.Event{
-				RunID:       state.ID,
-				Step:        state.Step,
-				Type:        agent.EventTypeRunFailed,
-				Description: fmt.Sprintf("model error: %v", err),
-			}))
-			return state, errors.Join(err, eventErr)
+			return l.failRun(ctx, state, err, eventErr)
 		}
 		if assistant.Role == "" {
 			assistant.Role = agent.RoleAssistant
@@ -116,6 +106,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 				Description: "assistant returned a final answer",
 			}))
 			return state, eventErr
+		}
+		if err := validateToolCallShape(assistant.ToolCalls); err != nil {
+			return l.failRun(ctx, state, err, eventErr)
 		}
 
 		for _, toolCall := range assistant.ToolCalls {
@@ -216,6 +209,46 @@ func validateToolResultIdentity(call agent.ToolCall, result agent.ToolResult) er
 		return fmt.Errorf("tool result name mismatch: got=%q want=%q", result.Name, call.Name)
 	}
 	return nil
+}
+
+func validateToolCallShape(calls []agent.ToolCall) error {
+	seen := make(map[string]int, len(calls))
+	for i, call := range calls {
+		if call.ID == "" {
+			return fmt.Errorf("%w: index=%d reason=empty_id", ErrToolCallInvalid, i)
+		}
+		if call.Name == "" {
+			return fmt.Errorf("%w: index=%d id=%q reason=empty_name", ErrToolCallInvalid, i, call.ID)
+		}
+		if firstIndex, exists := seen[call.ID]; exists {
+			return fmt.Errorf(
+				"%w: index=%d id=%q reason=duplicate_id first_index=%d",
+				ErrToolCallInvalid,
+				i,
+				call.ID,
+				firstIndex,
+			)
+		}
+		seen[call.ID] = i
+	}
+	return nil
+}
+
+func (l *ReactLoop) failRun(ctx context.Context, state agent.RunState, runErr error, eventErr error) (agent.RunState, error) {
+	if runErr == nil {
+		runErr = errors.New("run failed")
+	}
+	if transitionErr := agent.TransitionRunStatus(&state, agent.RunStatusFailed); transitionErr != nil {
+		return state, errors.Join(runErr, transitionErr, eventErr)
+	}
+	state.Error = runErr.Error()
+	eventErr = errors.Join(eventErr, publishEvent(ctx, l.events, agent.Event{
+		RunID:       state.ID,
+		Step:        state.Step,
+		Type:        agent.EventTypeRunFailed,
+		Description: fmt.Sprintf("model error: %v", runErr),
+	}))
+	return state, errors.Join(runErr, eventErr)
 }
 
 func (l *ReactLoop) cancelRun(ctx context.Context, state agent.RunState, runErr error, eventErr error) (agent.RunState, error) {

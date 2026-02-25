@@ -435,6 +435,86 @@ func TestToolFailure_ValidArgumentsUnchangedPath(t *testing.T) {
 	}
 }
 
+func TestToolCallValidation_InvalidShapeFailsRunBeforeExecution(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name      string
+		toolCalls []agent.ToolCall
+		wantError string
+	}{
+		{
+			name: "empty call id",
+			toolCalls: []agent.ToolCall{
+				{ID: "", Name: "lookup"},
+			},
+			wantError: "tool call is invalid: index=0 reason=empty_id",
+		},
+		{
+			name: "empty call name",
+			toolCalls: []agent.ToolCall{
+				{ID: "call-1", Name: ""},
+			},
+			wantError: "tool call is invalid: index=0 id=\"call-1\" reason=empty_name",
+		},
+		{
+			name: "duplicate call ids",
+			toolCalls: []agent.ToolCall{
+				{ID: "dup-id", Name: "lookup"},
+				{ID: "dup-id", Name: "lookup"},
+			},
+			wantError: "tool call is invalid: index=1 id=\"dup-id\" reason=duplicate_id first_index=0",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls atomic.Int32
+			model := newScriptedModel(response{
+				Message: agent.Message{
+					Role:      agent.RoleAssistant,
+					Content:   "invalid tool call shape",
+					ToolCalls: tc.toolCalls,
+				},
+			})
+			registry := newRegistry(map[string]handler{
+				"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+					calls.Add(1)
+					return "unexpected", nil
+				},
+			})
+
+			result, runErr, events := runToolTestExpectError(t, model, registry, []agent.ToolDefinition{
+				{Name: "lookup"},
+			})
+
+			if !errors.Is(runErr, agentreact.ErrToolCallInvalid) {
+				t.Fatalf("expected ErrToolCallInvalid, got %v", runErr)
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("unexpected executor calls: %d", calls.Load())
+			}
+			if result.State.Status != agent.RunStatusFailed {
+				t.Fatalf("unexpected status: got=%s want=%s", result.State.Status, agent.RunStatusFailed)
+			}
+			if result.State.Error != tc.wantError {
+				t.Fatalf("unexpected state error: got=%q want=%q", result.State.Error, tc.wantError)
+			}
+			if countEventsByType(events.Events(), agent.EventTypeToolResult) != 0 {
+				t.Fatalf("unexpected tool_result events for invalid tool-call shape")
+			}
+			runFailedEvent := mustSingleRunFailedEvent(t, events.Events())
+			wantDescription := "model error: " + tc.wantError
+			if runFailedEvent.Description != wantDescription {
+				t.Fatalf("unexpected run failed description: got=%q want=%q", runFailedEvent.Description, wantDescription)
+			}
+		})
+	}
+}
+
 type toolExecutorFunc func(context.Context, agent.ToolCall) (agent.ToolResult, error)
 
 func (f toolExecutorFunc) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
@@ -447,6 +527,24 @@ func runToolTest(
 	executor agentreact.ToolExecutor,
 	tools []agent.ToolDefinition,
 ) (agent.RunResult, *eventSink) {
+	t.Helper()
+
+	result, runErr, events := runToolTestExpectError(t, model, executor, tools)
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	return result, events
+}
+
+func runToolTestExpectError(
+	t *testing.T,
+	model *scriptedModel,
+	executor agentreact.ToolExecutor,
+	tools []agent.ToolDefinition,
+) (agent.RunResult, error, *eventSink) {
 	t.Helper()
 
 	events := newEventSink()
@@ -464,18 +562,40 @@ func runToolTest(
 		t.Fatalf("new runner: %v", err)
 	}
 
-	result, err := runner.Run(context.Background(), agent.RunInput{
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
 		UserPrompt: "Use tools.",
 		MaxSteps:   3,
 		Tools:      tools,
 	})
-	if err != nil {
-		t.Fatalf("run returned error: %v", err)
+	return result, runErr, events
+}
+
+func countEventsByType(events []agent.Event, eventType agent.EventType) int {
+	count := 0
+	for _, event := range events {
+		if event.Type == eventType {
+			count++
+		}
 	}
-	if result.State.Status != agent.RunStatusCompleted {
-		t.Fatalf("unexpected status: %s", result.State.Status)
+	return count
+}
+
+func mustSingleRunFailedEvent(t *testing.T, events []agent.Event) agent.Event {
+	t.Helper()
+
+	var runFailedEvent agent.Event
+	count := 0
+	for _, event := range events {
+		if event.Type != agent.EventTypeRunFailed {
+			continue
+		}
+		runFailedEvent = event
+		count++
 	}
-	return result, events
+	if count != 1 {
+		t.Fatalf("unexpected run failed event count: got=%d want=1", count)
+	}
+	return runFailedEvent
 }
 
 func mustToolResultEvent(t *testing.T, events []agent.Event) agent.ToolResult {
