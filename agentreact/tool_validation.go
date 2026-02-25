@@ -1,21 +1,23 @@
-package agent
+package agentreact
 
 import (
 	"errors"
 	"fmt"
 	"reflect"
 	"sort"
+
+	"agentruntime/agent"
 )
 
-func indexToolDefinitions(definitions []ToolDefinition) map[string]ToolDefinition {
-	out := make(map[string]ToolDefinition, len(definitions))
+func indexToolDefinitions(definitions []agent.ToolDefinition) map[string]agent.ToolDefinition {
+	out := make(map[string]agent.ToolDefinition, len(definitions))
 	for i := range definitions {
 		out[definitions[i].Name] = definitions[i]
 	}
 	return out
 }
 
-func validateToolCallArguments(call ToolCall, definition ToolDefinition) error {
+func validateToolCallArguments(call agent.ToolCall, definition agent.ToolDefinition) error {
 	return validateToolArguments(definition.InputSchema, call.Arguments)
 }
 
@@ -66,12 +68,12 @@ func validateToolArguments(schema map[string]any, arguments map[string]any) erro
 	return nil
 }
 
-func normalizedToolErrorResult(call ToolCall, reason ToolFailureReason, err error) ToolResult {
+func normalizedToolErrorResult(call agent.ToolCall, reason agent.ToolFailureReason, err error) agent.ToolResult {
 	message := string(reason)
 	if err != nil {
 		message = fmt.Sprintf("%s: %s", reason, err.Error())
 	}
-	return ToolResult{
+	return agent.ToolResult{
 		CallID:        call.ID,
 		Name:          call.Name,
 		Content:       message,

@@ -8,6 +8,7 @@ import (
 
 	"agentruntime/agent"
 	"agentruntime/agent/internal/testkit"
+	"agentruntime/agentreact"
 )
 
 func TestConformance_EventOrdering(t *testing.T) {
@@ -42,7 +43,7 @@ func TestConformance_EventOrdering(t *testing.T) {
 		},
 	})
 	events := testkit.NewEventSink()
-	loop, err := agent.NewReactLoop(model, registry, events)
+	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestConformance_TranscriptToolCallResultLinkage(t *testing.T) {
 			return "summary=" + args["text"].(string), nil
 		},
 	})
-	loop, err := agent.NewReactLoop(model, registry, testkit.NewEventSink())
+	loop, err := agentreact.New(model, registry, testkit.NewEventSink())
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
@@ -242,7 +243,7 @@ func TestConformance_ContinueDeterministicProgression(t *testing.T) {
 			return "tool-value", nil
 		},
 	})
-	loop, err := agent.NewReactLoop(model, registry, testkit.NewEventSink())
+	loop, err := agentreact.New(model, registry, testkit.NewEventSink())
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
@@ -343,7 +344,7 @@ func TestConformance_CommandAppliedContinueOrdering(t *testing.T) {
 		},
 	})
 	registry := testkit.NewRegistry(map[string]testkit.Handler{})
-	loop, err := agent.NewReactLoop(model, registry, events)
+	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
@@ -411,7 +412,7 @@ func TestConformance_CommandAppliedCancelOrdering(t *testing.T) {
 		},
 	})
 	registry := testkit.NewRegistry(map[string]testkit.Handler{})
-	loop, err := agent.NewReactLoop(model, registry, events)
+	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}

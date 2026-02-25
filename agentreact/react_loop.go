@@ -1,10 +1,12 @@
-package agent
+package agentreact
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"maps"
+
+	"agentruntime/agent"
 )
 
 const DefaultMaxSteps = 8
@@ -12,12 +14,12 @@ const DefaultMaxSteps = 8
 // ReactLoop executes a minimal ReAct sequence:
 // model -> tool calls -> tool observations -> model -> ...
 type ReactLoop struct {
-	model  Model
-	tools  ToolExecutor
-	events EventSink
+	model  agent.Model
+	tools  agent.ToolExecutor
+	events agent.EventSink
 }
 
-func NewReactLoop(model Model, tools ToolExecutor, events EventSink) (*ReactLoop, error) {
+func New(model agent.Model, tools agent.ToolExecutor, events agent.EventSink) (*ReactLoop, error) {
 	if model == nil {
 		return nil, errors.New("model is required")
 	}
@@ -34,14 +36,14 @@ func NewReactLoop(model Model, tools ToolExecutor, events EventSink) (*ReactLoop
 	}, nil
 }
 
-func (l *ReactLoop) Execute(ctx context.Context, state RunState, input EngineInput) (RunState, error) {
+func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
 	maxSteps := input.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = DefaultMaxSteps
 	}
 	toolDefinitions := indexToolDefinitions(input.Tools)
 
-	if err := transitionRunStatus(&state, RunStatusRunning); err != nil {
+	if err := transitionRunStatus(&state, agent.RunStatusRunning); err != nil {
 		return state, err
 	}
 	for state.Step < maxSteps {
@@ -51,46 +53,46 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, input EngineInp
 
 		state.Step++
 
-		assistant, err := l.model.Generate(ctx, ModelRequest{
-			Messages: CloneMessages(state.Messages),
+		assistant, err := l.model.Generate(ctx, agent.ModelRequest{
+			Messages: agent.CloneMessages(state.Messages),
 			Tools:    cloneToolDefinitions(input.Tools),
 		})
 		if err != nil {
 			if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
 				return l.cancelRun(ctx, state, cancellationErr)
 			}
-			if transitionErr := transitionRunStatus(&state, RunStatusFailed); transitionErr != nil {
+			if transitionErr := transitionRunStatus(&state, agent.RunStatusFailed); transitionErr != nil {
 				return state, errors.Join(err, transitionErr)
 			}
 			state.Error = err.Error()
-			_ = l.events.Publish(ctx, Event{
+			_ = l.events.Publish(ctx, agent.Event{
 				RunID:       state.ID,
 				Step:        state.Step,
-				Type:        EventTypeRunFailed,
+				Type:        agent.EventTypeRunFailed,
 				Description: fmt.Sprintf("model error: %v", err),
 			})
 			return state, err
 		}
 		if assistant.Role == "" {
-			assistant.Role = RoleAssistant
+			assistant.Role = agent.RoleAssistant
 		}
-		state.Messages = append(state.Messages, CloneMessage(assistant))
-		_ = l.events.Publish(ctx, Event{
+		state.Messages = append(state.Messages, agent.CloneMessage(assistant))
+		_ = l.events.Publish(ctx, agent.Event{
 			RunID:   state.ID,
 			Step:    state.Step,
-			Type:    EventTypeAssistantMessage,
+			Type:    agent.EventTypeAssistantMessage,
 			Message: &assistant,
 		})
 
 		if len(assistant.ToolCalls) == 0 {
-			if err := transitionRunStatus(&state, RunStatusCompleted); err != nil {
+			if err := transitionRunStatus(&state, agent.RunStatusCompleted); err != nil {
 				return state, err
 			}
 			state.Output = assistant.Content
-			_ = l.events.Publish(ctx, Event{
+			_ = l.events.Publish(ctx, agent.Event{
 				RunID:       state.ID,
 				Step:        state.Step,
-				Type:        EventTypeRunCompleted,
+				Type:        agent.EventTypeRunCompleted,
 				Description: "assistant returned a final answer",
 			})
 			return state, nil
@@ -106,18 +108,18 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, input EngineInp
 			if defined {
 				validationErr = validateToolCallArguments(toolCall, definition)
 			}
-			result := ToolResult{}
+			result := agent.ToolResult{}
 			switch {
 			case !defined:
 				result = normalizedToolErrorResult(
 					toolCall,
-					ToolFailureReasonUnknownTool,
+					agent.ToolFailureReasonUnknownTool,
 					fmt.Errorf("tool %q is not defined", toolCall.Name),
 				)
 			case validationErr != nil:
 				result = normalizedToolErrorResult(
 					toolCall,
-					ToolFailureReasonInvalidArguments,
+					agent.ToolFailureReasonInvalidArguments,
 					validationErr,
 				)
 			default:
@@ -126,7 +128,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, input EngineInp
 					if cancellationErr := contextCancellationError(ctx, toolErr); cancellationErr != nil {
 						return l.cancelRun(ctx, state, cancellationErr)
 					}
-					result = normalizedToolErrorResult(toolCall, ToolFailureReasonExecutorError, toolErr)
+					result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, toolErr)
 				} else {
 					result = executed
 				}
@@ -138,32 +140,32 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, input EngineInp
 				result.Name = toolCall.Name
 			}
 
-			state.Messages = append(state.Messages, ToolResultMessage(result))
+			state.Messages = append(state.Messages, agent.ToolResultMessage(result))
 			resultCopy := result
-			_ = l.events.Publish(ctx, Event{
+			_ = l.events.Publish(ctx, agent.Event{
 				RunID:      state.ID,
 				Step:       state.Step,
-				Type:       EventTypeToolResult,
+				Type:       agent.EventTypeToolResult,
 				ToolResult: &resultCopy,
 			})
 		}
 	}
 
-	if err := transitionRunStatus(&state, RunStatusMaxStepsExceeded); err != nil {
-		return state, errors.Join(ErrMaxStepsExceeded, err)
+	if err := transitionRunStatus(&state, agent.RunStatusMaxStepsExceeded); err != nil {
+		return state, errors.Join(agent.ErrMaxStepsExceeded, err)
 	}
-	state.Error = ErrMaxStepsExceeded.Error()
-	_ = l.events.Publish(ctx, Event{
+	state.Error = agent.ErrMaxStepsExceeded.Error()
+	_ = l.events.Publish(ctx, agent.Event{
 		RunID:       state.ID,
 		Step:        state.Step,
-		Type:        EventTypeRunFailed,
-		Description: ErrMaxStepsExceeded.Error(),
+		Type:        agent.EventTypeRunFailed,
+		Description: agent.ErrMaxStepsExceeded.Error(),
 	})
-	return state, ErrMaxStepsExceeded
+	return state, agent.ErrMaxStepsExceeded
 }
 
-func cloneToolDefinitions(in []ToolDefinition) []ToolDefinition {
-	out := make([]ToolDefinition, len(in))
+func cloneToolDefinitions(in []agent.ToolDefinition) []agent.ToolDefinition {
+	out := make([]agent.ToolDefinition, len(in))
 	for i := range in {
 		out[i] = in[i]
 		if in[i].InputSchema != nil {
@@ -176,7 +178,7 @@ func cloneToolDefinitions(in []ToolDefinition) []ToolDefinition {
 
 type noopEventSink struct{}
 
-func (noopEventSink) Publish(context.Context, Event) error {
+func (noopEventSink) Publish(context.Context, agent.Event) error {
 	return nil
 }
 
@@ -194,18 +196,18 @@ func contextCancellationError(ctx context.Context, err error) error {
 	}
 }
 
-func (l *ReactLoop) cancelRun(ctx context.Context, state RunState, runErr error) (RunState, error) {
+func (l *ReactLoop) cancelRun(ctx context.Context, state agent.RunState, runErr error) (agent.RunState, error) {
 	if runErr == nil {
 		runErr = context.Canceled
 	}
-	if transitionErr := transitionRunStatus(&state, RunStatusCancelled); transitionErr != nil {
+	if transitionErr := transitionRunStatus(&state, agent.RunStatusCancelled); transitionErr != nil {
 		return state, errors.Join(runErr, transitionErr)
 	}
 	state.Error = runErr.Error()
-	_ = l.events.Publish(ctx, Event{
+	_ = l.events.Publish(ctx, agent.Event{
 		RunID:       state.ID,
 		Step:        state.Step,
-		Type:        EventTypeRunCancelled,
+		Type:        agent.EventTypeRunCancelled,
 		Description: runErr.Error(),
 	})
 	return state, runErr

@@ -7,6 +7,7 @@ import (
 
 	"agentruntime/agent"
 	"agentruntime/agent/internal/testkit"
+	"agentruntime/agentreact"
 )
 
 func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {
@@ -41,7 +42,7 @@ func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {
 		},
 	})
 	events := testkit.NewEventSink()
-	loop, err := agent.NewReactLoop(model, registry, events)
+	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 			return "value", nil
 		},
 	})
-	loop, err := agent.NewReactLoop(model, registry, testkit.NewEventSink())
+	loop, err := agentreact.New(model, registry, testkit.NewEventSink())
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}

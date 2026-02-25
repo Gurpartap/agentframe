@@ -8,6 +8,7 @@ import (
 
 	"agentruntime/agent"
 	"agentruntime/agent/internal/testkit"
+	"agentruntime/agentreact"
 )
 
 func TestRunnerDispatch_StartWrapperParity(t *testing.T) {
@@ -682,7 +683,7 @@ func newDispatchRunner(
 
 	model := testkit.NewScriptedModel(responses...)
 	registry := testkit.NewRegistry(map[string]testkit.Handler{})
-	loop, err := agent.NewReactLoop(model, registry, events)
+	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}

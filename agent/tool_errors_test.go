@@ -9,6 +9,7 @@ import (
 
 	"agentruntime/agent"
 	"agentruntime/agent/internal/testkit"
+	"agentruntime/agentreact"
 )
 
 func TestToolFailure_UnknownTool(t *testing.T) {
@@ -258,7 +259,7 @@ func runToolTest(
 	t.Helper()
 
 	events := testkit.NewEventSink()
-	loop, err := agent.NewReactLoop(model, registry, events)
+	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}

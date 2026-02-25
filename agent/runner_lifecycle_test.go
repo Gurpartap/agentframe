@@ -8,6 +8,7 @@ import (
 
 	"agentruntime/agent"
 	"agentruntime/agent/internal/testkit"
+	"agentruntime/agentreact"
 )
 
 func TestRunnerCancel_NonTerminalStates(t *testing.T) {
@@ -340,7 +341,7 @@ func newLifecycleRunner(t *testing.T, store *testkit.RunStore, events *testkit.E
 		},
 	)
 	registry := testkit.NewRegistry(map[string]testkit.Handler{})
-	loop, err := agent.NewReactLoop(model, registry, events)
+	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
