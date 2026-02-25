@@ -185,6 +185,192 @@ func TestToolFailure_ExecutorError(t *testing.T) {
 	}
 }
 
+func TestToolFailure_ExecutorResultCallIDMismatch(t *testing.T) {
+	t.Parallel()
+
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "Calling tool.",
+				ToolCalls: []agent.ToolCall{
+					{
+						ID:   "call-1",
+						Name: "lookup",
+						Arguments: map[string]any{
+							"q": "Go",
+						},
+					},
+				},
+			},
+		},
+		response{
+			Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
+		},
+	)
+	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
+		return agent.ToolResult{
+			CallID:  "other-call",
+			Name:    "lookup",
+			Content: "tool-value",
+		}, nil
+	})
+	tools := []agent.ToolDefinition{{Name: "lookup"}}
+
+	result, events := runToolTest(t, model, executor, tools)
+
+	toolResult := mustToolResultEvent(t, events.Events())
+	if !toolResult.IsError {
+		t.Fatalf("expected tool result error")
+	}
+	if toolResult.FailureReason != agent.ToolFailureReasonExecutorError {
+		t.Fatalf("unexpected failure reason: %s", toolResult.FailureReason)
+	}
+	if toolResult.CallID != "call-1" {
+		t.Fatalf("unexpected tool result call id: %q", toolResult.CallID)
+	}
+	if toolResult.Name != "lookup" {
+		t.Fatalf("unexpected tool result name: %q", toolResult.Name)
+	}
+	if !strings.Contains(toolResult.Content, "call id mismatch") {
+		t.Fatalf("unexpected tool result content: %q", toolResult.Content)
+	}
+	if result.State.Messages[2].Role != agent.RoleTool {
+		t.Fatalf("unexpected transcript role: %+v", result.State.Messages[2])
+	}
+	if result.State.Messages[2].ToolCallID != "call-1" {
+		t.Fatalf("unexpected transcript tool_call_id: %q", result.State.Messages[2].ToolCallID)
+	}
+	if result.State.Messages[2].Name != "lookup" {
+		t.Fatalf("unexpected transcript tool name: %q", result.State.Messages[2].Name)
+	}
+}
+
+func TestToolFailure_ExecutorResultNameMismatch(t *testing.T) {
+	t.Parallel()
+
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "Calling tool.",
+				ToolCalls: []agent.ToolCall{
+					{
+						ID:   "call-1",
+						Name: "lookup",
+						Arguments: map[string]any{
+							"q": "Go",
+						},
+					},
+				},
+			},
+		},
+		response{
+			Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
+		},
+	)
+	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
+		return agent.ToolResult{
+			CallID:  "call-1",
+			Name:    "other-tool",
+			Content: "tool-value",
+		}, nil
+	})
+	tools := []agent.ToolDefinition{{Name: "lookup"}}
+
+	result, events := runToolTest(t, model, executor, tools)
+
+	toolResult := mustToolResultEvent(t, events.Events())
+	if !toolResult.IsError {
+		t.Fatalf("expected tool result error")
+	}
+	if toolResult.FailureReason != agent.ToolFailureReasonExecutorError {
+		t.Fatalf("unexpected failure reason: %s", toolResult.FailureReason)
+	}
+	if toolResult.CallID != "call-1" {
+		t.Fatalf("unexpected tool result call id: %q", toolResult.CallID)
+	}
+	if toolResult.Name != "lookup" {
+		t.Fatalf("unexpected tool result name: %q", toolResult.Name)
+	}
+	if !strings.Contains(toolResult.Content, "name mismatch") {
+		t.Fatalf("unexpected tool result content: %q", toolResult.Content)
+	}
+	if result.State.Messages[2].Role != agent.RoleTool {
+		t.Fatalf("unexpected transcript role: %+v", result.State.Messages[2])
+	}
+	if result.State.Messages[2].ToolCallID != "call-1" {
+		t.Fatalf("unexpected transcript tool_call_id: %q", result.State.Messages[2].ToolCallID)
+	}
+	if result.State.Messages[2].Name != "lookup" {
+		t.Fatalf("unexpected transcript tool name: %q", result.State.Messages[2].Name)
+	}
+}
+
+func TestToolResultNormalization_EmptyIdentityFieldsRemainValid(t *testing.T) {
+	t.Parallel()
+
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "Calling tool.",
+				ToolCalls: []agent.ToolCall{
+					{
+						ID:   "call-1",
+						Name: "lookup",
+						Arguments: map[string]any{
+							"q": "Go",
+						},
+					},
+				},
+			},
+		},
+		response{
+			Message: agent.Message{Role: agent.RoleAssistant, Content: "done"},
+		},
+	)
+	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
+		return agent.ToolResult{
+			CallID:  "",
+			Name:    "",
+			Content: "tool-value",
+		}, nil
+	})
+	tools := []agent.ToolDefinition{{Name: "lookup"}}
+
+	result, events := runToolTest(t, model, executor, tools)
+
+	toolResult := mustToolResultEvent(t, events.Events())
+	if toolResult.IsError {
+		t.Fatalf("expected non-error tool result")
+	}
+	if toolResult.FailureReason != "" {
+		t.Fatalf("unexpected failure reason: %q", toolResult.FailureReason)
+	}
+	if toolResult.CallID != "call-1" {
+		t.Fatalf("unexpected tool result call id: %q", toolResult.CallID)
+	}
+	if toolResult.Name != "lookup" {
+		t.Fatalf("unexpected tool result name: %q", toolResult.Name)
+	}
+	if toolResult.Content != "tool-value" {
+		t.Fatalf("unexpected tool result content: %q", toolResult.Content)
+	}
+	if result.State.Messages[2].Role != agent.RoleTool {
+		t.Fatalf("unexpected transcript role: %+v", result.State.Messages[2])
+	}
+	if result.State.Messages[2].ToolCallID != "call-1" {
+		t.Fatalf("unexpected transcript tool_call_id: %q", result.State.Messages[2].ToolCallID)
+	}
+	if result.State.Messages[2].Name != "lookup" {
+		t.Fatalf("unexpected transcript tool name: %q", result.State.Messages[2].Name)
+	}
+	if result.State.Messages[2].Content != "tool-value" {
+		t.Fatalf("unexpected transcript content: %q", result.State.Messages[2].Content)
+	}
+}
+
 func TestToolFailure_ValidArgumentsUnchangedPath(t *testing.T) {
 	t.Parallel()
 
@@ -249,16 +435,22 @@ func TestToolFailure_ValidArgumentsUnchangedPath(t *testing.T) {
 	}
 }
 
+type toolExecutorFunc func(context.Context, agent.ToolCall) (agent.ToolResult, error)
+
+func (f toolExecutorFunc) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	return f(ctx, call)
+}
+
 func runToolTest(
 	t *testing.T,
 	model *scriptedModel,
-	registry *registry,
+	executor agentreact.ToolExecutor,
 	tools []agent.ToolDefinition,
 ) (agent.RunResult, *eventSink) {
 	t.Helper()
 
 	events := newEventSink()
-	loop, err := agentreact.New(model, registry, events)
+	loop, err := agentreact.New(model, executor, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}

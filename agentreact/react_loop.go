@@ -150,7 +150,11 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 					}
 					result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, toolErr)
 				} else {
-					result = executed
+					if identityErr := validateToolResultIdentity(toolCall, executed); identityErr != nil {
+						result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, identityErr)
+					} else {
+						result = executed
+					}
 				}
 			}
 			if result.CallID == "" {
@@ -202,6 +206,16 @@ func contextCancellationError(ctx context.Context, err error) error {
 	default:
 		return nil
 	}
+}
+
+func validateToolResultIdentity(call agent.ToolCall, result agent.ToolResult) error {
+	if result.CallID != "" && result.CallID != call.ID {
+		return fmt.Errorf("tool result call id mismatch: got=%q want=%q", result.CallID, call.ID)
+	}
+	if result.Name != "" && result.Name != call.Name {
+		return fmt.Errorf("tool result name mismatch: got=%q want=%q", result.Name, call.Name)
+	}
+	return nil
 }
 
 func (l *ReactLoop) cancelRun(ctx context.Context, state agent.RunState, runErr error, eventErr error) (agent.RunState, error) {
