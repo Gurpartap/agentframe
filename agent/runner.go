@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 )
 
 // Dependencies wires application services into the runtime orchestrator.
@@ -61,9 +62,11 @@ func publishEvent(ctx context.Context, sink EventSink, event Event) error {
 
 // Dispatch executes a typed command against the run store.
 func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
-	switch command := cmd.(type) {
-	case nil:
+	if isNilCommand(cmd) {
 		return RunResult{}, ErrCommandNil
+	}
+
+	switch command := cmd.(type) {
 	case StartCommand:
 		return r.dispatchStart(ctx, command)
 	case *StartCommand:
@@ -106,6 +109,20 @@ func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
 		default:
 			return RunResult{}, fmt.Errorf("%w: %s", ErrCommandUnsupported, kind)
 		}
+	}
+}
+
+func isNilCommand(cmd Command) bool {
+	if cmd == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(cmd)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
 	}
 }
 

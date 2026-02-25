@@ -302,6 +302,7 @@ func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
 	var nilCancel *agent.CancelCommand
 	var nilSteer *agent.SteerCommand
 	var nilFollowUp *agent.FollowUpCommand
+	var nilUnknown *unknownCommand
 	nilCases := []struct {
 		name string
 		cmd  agent.Command
@@ -312,6 +313,7 @@ func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
 		{name: "nil_cancel", cmd: nilCancel},
 		{name: "nil_steer", cmd: nilSteer},
 		{name: "nil_follow_up", cmd: nilFollowUp},
+		{name: "nil_unknown", cmd: nilUnknown},
 	}
 	for _, tc := range nilCases {
 		tc := tc
