@@ -268,6 +268,9 @@ func TestConformance_ContinueDeterministicProgression(t *testing.T) {
 	if initialResult.State.Step != 1 {
 		t.Fatalf("unexpected initial step: %d", initialResult.State.Step)
 	}
+	if initialResult.State.Version != 2 {
+		t.Fatalf("unexpected initial version: %d", initialResult.State.Version)
+	}
 
 	loadedBeforeContinue, err := store.Load(context.Background(), initialResult.State.ID)
 	if err != nil {
@@ -289,6 +292,9 @@ func TestConformance_ContinueDeterministicProgression(t *testing.T) {
 	}
 	if continuedResult.State.Step != 2 {
 		t.Fatalf("unexpected continued step: %d", continuedResult.State.Step)
+	}
+	if continuedResult.State.Version != initialResult.State.Version+1 {
+		t.Fatalf("unexpected continued version: got=%d want=%d", continuedResult.State.Version, initialResult.State.Version+1)
 	}
 	if continuedResult.State.Output != "Final answer after continue." {
 		t.Fatalf("unexpected continued output: %q", continuedResult.State.Output)

@@ -73,6 +73,9 @@ func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {
 	if result.State.Output != "Final answer after tool observation." {
 		t.Fatalf("unexpected output: %q", result.State.Output)
 	}
+	if result.State.Version != 2 {
+		t.Fatalf("unexpected version: %d", result.State.Version)
+	}
 	if len(result.State.Messages) != 5 {
 		t.Fatalf("unexpected message count: %d", len(result.State.Messages))
 	}
@@ -126,5 +129,8 @@ func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 	}
 	if result.State.Status != agent.RunStatusMaxStepsExceeded {
 		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.Version != 2 {
+		t.Fatalf("unexpected version: %d", result.State.Version)
 	}
 }

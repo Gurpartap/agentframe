@@ -106,8 +106,36 @@ func NewRunStore() *RunStore {
 func (s *RunStore) Save(_ context.Context, runState agent.RunState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.state[runState.ID] = agent.CloneRunState(runState)
-	return nil
+
+	current, exists := s.state[runState.ID]
+	switch {
+	case !exists:
+		if runState.Version != 0 {
+			return fmt.Errorf(
+				"%w: run %q expected version 0 on create, got %d",
+				agent.ErrRunVersionConflict,
+				runState.ID,
+				runState.Version,
+			)
+		}
+		next := agent.CloneRunState(runState)
+		next.Version = 1
+		s.state[runState.ID] = next
+		return nil
+	case runState.Version != current.Version:
+		return fmt.Errorf(
+			"%w: run %q expected version %d, got %d",
+			agent.ErrRunVersionConflict,
+			runState.ID,
+			current.Version,
+			runState.Version,
+		)
+	default:
+		next := agent.CloneRunState(runState)
+		next.Version = current.Version + 1
+		s.state[runState.ID] = next
+		return nil
+	}
 }
 
 func (s *RunStore) Load(_ context.Context, runID agent.RunID) (agent.RunState, error) {

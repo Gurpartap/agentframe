@@ -7,6 +7,8 @@ var (
 	ErrMaxStepsExceeded = errors.New("react loop exceeded max steps")
 	// ErrRunNotFound is returned by run stores when a run ID is unknown.
 	ErrRunNotFound = errors.New("run not found")
+	// ErrRunVersionConflict is returned when a save is attempted with a stale run version.
+	ErrRunVersionConflict = errors.New("run version conflict")
 	// ErrInvalidRunStateTransition is returned when a run state transition violates lifecycle rules.
 	ErrInvalidRunStateTransition = errors.New("invalid run state transition")
 	// ErrRunNotContinuable is returned when continue is requested for a terminal run.

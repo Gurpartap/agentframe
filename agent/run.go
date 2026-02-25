@@ -28,6 +28,7 @@ type RunInput struct {
 // RunState is the durable runtime state.
 type RunState struct {
 	ID       RunID     `json:"id"`
+	Version  int64     `json:"version"`
 	Step     int       `json:"step"`
 	Status   RunStatus `json:"status"`
 	Output   string    `json:"output,omitempty"`

@@ -76,6 +76,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (RunResult, error) {
 	if err := r.store.Save(ctx, state); err != nil {
 		return RunResult{}, err
 	}
+	state.Version++
 	_ = r.events.Publish(ctx, Event{
 		RunID:       runID,
 		Step:        0,
@@ -94,6 +95,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) (RunResult, error) {
 		}
 		return RunResult{}, saveErr
 	}
+	finalState.Version++
 	_ = r.events.Publish(ctx, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
@@ -122,6 +124,7 @@ func (r *Runner) Continue(ctx context.Context, runID RunID, maxSteps int, tools 
 		}
 		return RunResult{}, saveErr
 	}
+	finalState.Version++
 	_ = r.events.Publish(ctx, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
@@ -146,6 +149,7 @@ func (r *Runner) Cancel(ctx context.Context, runID RunID) (RunResult, error) {
 	if err := r.store.Save(ctx, state); err != nil {
 		return RunResult{}, err
 	}
+	state.Version++
 	_ = r.events.Publish(ctx, Event{
 		RunID:       runID,
 		Step:        state.Step,

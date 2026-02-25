@@ -41,6 +41,10 @@ func TestRunnerCancel_NonTerminalStates(t *testing.T) {
 			if err := store.Save(context.Background(), initial); err != nil {
 				t.Fatalf("save initial state: %v", err)
 			}
+			persistedInitial, err := store.Load(context.Background(), initial.ID)
+			if err != nil {
+				t.Fatalf("load initial state: %v", err)
+			}
 
 			result, err := runner.Cancel(context.Background(), initial.ID)
 			if err != nil {
@@ -51,6 +55,9 @@ func TestRunnerCancel_NonTerminalStates(t *testing.T) {
 			}
 			if result.State.Step != initial.Step {
 				t.Fatalf("unexpected step: got=%d want=%d", result.State.Step, initial.Step)
+			}
+			if result.State.Version != persistedInitial.Version+1 {
+				t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version+1)
 			}
 			if !reflect.DeepEqual(result.State.Messages, initial.Messages) {
 				t.Fatalf("cancel changed transcript")
@@ -110,6 +117,10 @@ func TestRunnerCancel_TerminalStatesRejected(t *testing.T) {
 			if err := store.Save(context.Background(), initial); err != nil {
 				t.Fatalf("save initial state: %v", err)
 			}
+			persistedInitial, err := store.Load(context.Background(), initial.ID)
+			if err != nil {
+				t.Fatalf("load initial state: %v", err)
+			}
 
 			result, err := runner.Cancel(context.Background(), initial.ID)
 			if !errors.Is(err, agent.ErrRunNotCancellable) {
@@ -118,13 +129,16 @@ func TestRunnerCancel_TerminalStatesRejected(t *testing.T) {
 			if result.State.Status != tc.status {
 				t.Fatalf("unexpected status: got=%s want=%s", result.State.Status, tc.status)
 			}
+			if result.State.Version != persistedInitial.Version {
+				t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version)
+			}
 
 			loaded, err := store.Load(context.Background(), initial.ID)
 			if err != nil {
 				t.Fatalf("load state: %v", err)
 			}
-			if loaded.ID != initial.ID || loaded.Status != initial.Status || loaded.Step != initial.Step {
-				t.Fatalf("terminal state changed after cancel: got=%+v want=%+v", loaded, initial)
+			if loaded.ID != persistedInitial.ID || loaded.Status != persistedInitial.Status || loaded.Step != persistedInitial.Step || loaded.Version != persistedInitial.Version {
+				t.Fatalf("terminal state changed after cancel: got=%+v want=%+v", loaded, persistedInitial)
 			}
 
 			if gotEvents := events.Events(); len(gotEvents) != 0 {
@@ -163,6 +177,10 @@ func TestRunnerContinue_TerminalStatesRejected(t *testing.T) {
 			if err := store.Save(context.Background(), initial); err != nil {
 				t.Fatalf("save initial state: %v", err)
 			}
+			persistedInitial, err := store.Load(context.Background(), initial.ID)
+			if err != nil {
+				t.Fatalf("load initial state: %v", err)
+			}
 
 			result, err := runner.Continue(context.Background(), initial.ID, 3, nil)
 			if !errors.Is(err, agent.ErrRunNotContinuable) {
@@ -170,6 +188,9 @@ func TestRunnerContinue_TerminalStatesRejected(t *testing.T) {
 			}
 			if result.State.Status != tc.status {
 				t.Fatalf("unexpected status: got=%s want=%s", result.State.Status, tc.status)
+			}
+			if result.State.Version != persistedInitial.Version {
+				t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version)
 			}
 
 			if gotEvents := events.Events(); len(gotEvents) != 0 {
