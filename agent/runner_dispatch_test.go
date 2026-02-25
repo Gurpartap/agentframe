@@ -149,6 +149,144 @@ func TestRunnerDispatch_CancelWrapperParity(t *testing.T) {
 	}
 }
 
+func TestRunnerDispatch_SteerWrapperParity(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("dispatch-steer-run")
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusPending,
+		Step:   3,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "seed"},
+		},
+	}
+
+	wrapperStore := testkit.NewRunStore()
+	if err := wrapperStore.Save(context.Background(), initial); err != nil {
+		t.Fatalf("seed wrapper store: %v", err)
+	}
+	dispatchStore := testkit.NewRunStore()
+	if err := dispatchStore.Save(context.Background(), initial); err != nil {
+		t.Fatalf("seed dispatch store: %v", err)
+	}
+
+	wrapperEvents := testkit.NewEventSink()
+	wrapperEngine := &engineSpy{}
+	wrapperRunner := newDispatchRunnerWithEngine(t, wrapperStore, wrapperEvents, wrapperEngine)
+	dispatchEvents := testkit.NewEventSink()
+	dispatchEngine := &engineSpy{}
+	dispatchRunner := newDispatchRunnerWithEngine(t, dispatchStore, dispatchEvents, dispatchEngine)
+
+	wrapperResult, wrapperErr := wrapperRunner.Steer(context.Background(), runID, "steer now")
+	if wrapperErr != nil {
+		t.Fatalf("steer wrapper error: %v", wrapperErr)
+	}
+	dispatchResult, dispatchErr := dispatchRunner.Dispatch(context.Background(), agent.SteerCommand{
+		RunID:       runID,
+		Instruction: "steer now",
+	})
+	if dispatchErr != nil {
+		t.Fatalf("dispatch steer error: %v", dispatchErr)
+	}
+
+	if !reflect.DeepEqual(dispatchResult, wrapperResult) {
+		t.Fatalf("steer wrapper/dispatch mismatch: wrapper=%+v dispatch=%+v", wrapperResult, dispatchResult)
+	}
+	if wrapperEngine.calls != 0 || dispatchEngine.calls != 0 {
+		t.Fatalf("steer must not invoke engine: wrapper_calls=%d dispatch_calls=%d", wrapperEngine.calls, dispatchEngine.calls)
+	}
+	assertEventTypes(t, wrapperEvents.Events(), []agent.EventType{
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	})
+	assertEventTypes(t, dispatchEvents.Events(), []agent.EventType{
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	})
+	assertCommandKind(t, wrapperEvents.Events(), agent.CommandKindSteer)
+	assertCommandKind(t, dispatchEvents.Events(), agent.CommandKindSteer)
+}
+
+func TestRunnerDispatch_FollowUpWrapperParity(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("dispatch-followup-parity")
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusPending,
+		Step:   2,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "seed"},
+		},
+	}
+
+	wrapperStore := testkit.NewRunStore()
+	if err := wrapperStore.Save(context.Background(), initial); err != nil {
+		t.Fatalf("seed wrapper store: %v", err)
+	}
+	dispatchStore := testkit.NewRunStore()
+	if err := dispatchStore.Save(context.Background(), initial); err != nil {
+		t.Fatalf("seed dispatch store: %v", err)
+	}
+
+	wrapperEvents := testkit.NewEventSink()
+	wrapperRunner := newDispatchRunner(
+		t,
+		wrapperStore,
+		wrapperEvents,
+		testkit.Response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "follow-up done",
+			},
+		},
+	)
+	dispatchEvents := testkit.NewEventSink()
+	dispatchRunner := newDispatchRunner(
+		t,
+		dispatchStore,
+		dispatchEvents,
+		testkit.Response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "follow-up done",
+			},
+		},
+	)
+
+	wrapperResult, wrapperErr := wrapperRunner.FollowUp(context.Background(), runID, "next prompt", 4, nil)
+	if wrapperErr != nil {
+		t.Fatalf("follow up wrapper error: %v", wrapperErr)
+	}
+	dispatchResult, dispatchErr := dispatchRunner.Dispatch(context.Background(), agent.FollowUpCommand{
+		RunID:      runID,
+		UserPrompt: "next prompt",
+		MaxSteps:   4,
+	})
+	if dispatchErr != nil {
+		t.Fatalf("dispatch follow up error: %v", dispatchErr)
+	}
+
+	if !reflect.DeepEqual(dispatchResult, wrapperResult) {
+		t.Fatalf("follow up wrapper/dispatch mismatch: wrapper=%+v dispatch=%+v", wrapperResult, dispatchResult)
+	}
+	assertEventTypes(t, wrapperEvents.Events(), []agent.EventType{
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	})
+	assertEventTypes(t, dispatchEvents.Events(), []agent.EventType{
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	})
+	assertCommandKind(t, wrapperEvents.Events(), agent.CommandKindFollowUp)
+	assertCommandKind(t, dispatchEvents.Events(), agent.CommandKindFollowUp)
+}
+
 func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
 	t.Parallel()
 
@@ -157,21 +295,54 @@ func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
 	})
 
 	var nilCommand agent.Command
-	if _, err := runner.Dispatch(context.Background(), nilCommand); !errors.Is(err, agent.ErrCommandNil) {
-		t.Fatalf("expected ErrCommandNil for nil command, got %v", err)
-	}
-
 	var nilStart *agent.StartCommand
-	if _, err := runner.Dispatch(context.Background(), nilStart); !errors.Is(err, agent.ErrCommandNil) {
-		t.Fatalf("expected ErrCommandNil for nil start command, got %v", err)
+	var nilContinue *agent.ContinueCommand
+	var nilCancel *agent.CancelCommand
+	var nilSteer *agent.SteerCommand
+	var nilFollowUp *agent.FollowUpCommand
+	nilCases := []struct {
+		name string
+		cmd  agent.Command
+	}{
+		{name: "nil", cmd: nilCommand},
+		{name: "nil_start", cmd: nilStart},
+		{name: "nil_continue", cmd: nilContinue},
+		{name: "nil_cancel", cmd: nilCancel},
+		{name: "nil_steer", cmd: nilSteer},
+		{name: "nil_follow_up", cmd: nilFollowUp},
+	}
+	for _, tc := range nilCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := runner.Dispatch(context.Background(), tc.cmd); !errors.Is(err, agent.ErrCommandNil) {
+				t.Fatalf("expected ErrCommandNil, got %v", err)
+			}
+		})
 	}
 
 	if _, err := runner.Dispatch(context.Background(), unknownCommand{}); !errors.Is(err, agent.ErrCommandUnsupported) {
 		t.Fatalf("expected ErrCommandUnsupported, got %v", err)
 	}
 
-	if _, err := runner.Dispatch(context.Background(), invalidStartCommand{}); !errors.Is(err, agent.ErrCommandInvalid) {
-		t.Fatalf("expected ErrCommandInvalid, got %v", err)
+	invalidCases := []struct {
+		name string
+		cmd  agent.Command
+	}{
+		{name: "invalid_start", cmd: invalidStartCommand{}},
+		{name: "invalid_continue", cmd: invalidContinueCommand{}},
+		{name: "invalid_cancel", cmd: invalidCancelCommand{}},
+		{name: "invalid_steer", cmd: invalidSteerCommand{}},
+		{name: "invalid_follow_up", cmd: invalidFollowUpCommand{}},
+	}
+	for _, tc := range invalidCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := runner.Dispatch(context.Background(), tc.cmd); !errors.Is(err, agent.ErrCommandInvalid) {
+				t.Fatalf("expected ErrCommandInvalid, got %v", err)
+			}
+		})
 	}
 }
 
@@ -326,28 +497,97 @@ func TestRunnerFollowUp_AppendsTranscriptAndInvokesEngine(t *testing.T) {
 	}
 }
 
-func TestRunnerSteerFollowUp_TerminalStateRejected(t *testing.T) {
+func TestRunnerSteerThenFollowUp_TranscriptAppendOnly(t *testing.T) {
 	t.Parallel()
 
-	const runID = agent.RunID("dispatch-terminal-steer-follow-up")
+	const runID = agent.RunID("dispatch-steer-follow-up-append")
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusPending,
+		Messages: []agent.Message{
+			{Role: agent.RoleSystem, Content: "system"},
+			{Role: agent.RoleUser, Content: "original"},
+		},
+	}
+	store := testkit.NewRunStore()
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	events := testkit.NewEventSink()
+	runner := newDispatchRunner(
+		t,
+		store,
+		events,
+		testkit.Response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "follow-up done",
+			},
+		},
+	)
+
+	steered, err := runner.Steer(context.Background(), runID, "steer instruction")
+	if err != nil {
+		t.Fatalf("steer returned error: %v", err)
+	}
+	prefix := agent.CloneMessages(steered.State.Messages)
+	followed, err := runner.FollowUp(context.Background(), runID, "follow-up prompt", 3, nil)
+	if err != nil {
+		t.Fatalf("follow up returned error: %v", err)
+	}
+	if len(followed.State.Messages) <= len(prefix) {
+		t.Fatalf("expected transcript growth after follow up")
+	}
+	if !reflect.DeepEqual(followed.State.Messages[:len(prefix)], prefix) {
+		t.Fatalf("follow up mutated transcript prefix")
+	}
+	if followed.State.Messages[len(prefix)].Role != agent.RoleUser || followed.State.Messages[len(prefix)].Content != "follow-up prompt" {
+		t.Fatalf("unexpected follow-up appended message: %+v", followed.State.Messages[len(prefix)])
+	}
+}
+
+func TestRunnerDispatch_TerminalStateImmutabilityForMutatingCommands(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("dispatch-terminal-mutation-matrix")
 	initial := agent.RunState{
 		ID:     runID,
 		Status: agent.RunStatusCompleted,
 		Step:   2,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "frozen"},
+		},
 	}
 
 	cases := []struct {
-		name string
-		call func(context.Context, *agent.Runner) (agent.RunResult, error)
+		name    string
+		wantErr error
+		call    func(context.Context, *agent.Runner) (agent.RunResult, error)
 	}{
 		{
-			name: "steer",
+			name:    "continue",
+			wantErr: agent.ErrRunNotContinuable,
+			call: func(ctx context.Context, runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Continue(ctx, runID, 3, nil)
+			},
+		},
+		{
+			name:    "cancel",
+			wantErr: agent.ErrRunNotCancellable,
+			call: func(ctx context.Context, runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Cancel(ctx, runID)
+			},
+		},
+		{
+			name:    "steer",
+			wantErr: agent.ErrRunNotContinuable,
 			call: func(ctx context.Context, runner *agent.Runner) (agent.RunResult, error) {
 				return runner.Steer(ctx, runID, "instruction")
 			},
 		},
 		{
-			name: "follow_up",
+			name:    "follow_up",
+			wantErr: agent.ErrRunNotContinuable,
 			call: func(ctx context.Context, runner *agent.Runner) (agent.RunResult, error) {
 				return runner.FollowUp(ctx, runID, "prompt", 3, nil)
 			},
@@ -373,17 +613,21 @@ func TestRunnerSteerFollowUp_TerminalStateRejected(t *testing.T) {
 			runner := newDispatchRunnerWithEngine(t, store, events, engine)
 
 			result, err := tc.call(context.Background(), runner)
-			if !errors.Is(err, agent.ErrRunNotContinuable) {
-				t.Fatalf("expected ErrRunNotContinuable, got %v", err)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("expected %v, got %v", tc.wantErr, err)
 			}
-			if result.State.Status != persistedInitial.Status {
-				t.Fatalf("unexpected status: got=%s want=%s", result.State.Status, persistedInitial.Status)
-			}
-			if result.State.Version != persistedInitial.Version {
-				t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version)
+			if !reflect.DeepEqual(result.State, persistedInitial) {
+				t.Fatalf("result state mutated: got=%+v want=%+v", result.State, persistedInitial)
 			}
 			if engine.calls != 0 {
 				t.Fatalf("engine should not execute on terminal rejection, calls=%d", engine.calls)
+			}
+			loaded, err := store.Load(context.Background(), runID)
+			if err != nil {
+				t.Fatalf("load state: %v", err)
+			}
+			if !reflect.DeepEqual(loaded, persistedInitial) {
+				t.Fatalf("persisted state mutated: got=%+v want=%+v", loaded, persistedInitial)
 			}
 			if gotEvents := events.Events(); len(gotEvents) != 0 {
 				t.Fatalf("unexpected events emitted: %d", len(gotEvents))
@@ -402,6 +646,30 @@ type invalidStartCommand struct{}
 
 func (invalidStartCommand) Kind() agent.CommandKind {
 	return agent.CommandKindStart
+}
+
+type invalidContinueCommand struct{}
+
+func (invalidContinueCommand) Kind() agent.CommandKind {
+	return agent.CommandKindContinue
+}
+
+type invalidCancelCommand struct{}
+
+func (invalidCancelCommand) Kind() agent.CommandKind {
+	return agent.CommandKindCancel
+}
+
+type invalidSteerCommand struct{}
+
+func (invalidSteerCommand) Kind() agent.CommandKind {
+	return agent.CommandKindSteer
+}
+
+type invalidFollowUpCommand struct{}
+
+func (invalidFollowUpCommand) Kind() agent.CommandKind {
+	return agent.CommandKindFollowUp
 }
 
 func newDispatchRunner(
@@ -461,4 +729,30 @@ func newDispatchRunnerWithEngine(
 		t.Fatalf("new runner: %v", err)
 	}
 	return runner
+}
+
+func assertEventTypes(t *testing.T, events []agent.Event, want []agent.EventType) {
+	t.Helper()
+	if len(events) != len(want) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(events), len(want))
+	}
+	for i := range want {
+		if events[i].Type != want[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, events[i].Type, want[i])
+		}
+	}
+}
+
+func assertCommandKind(t *testing.T, events []agent.Event, want agent.CommandKind) {
+	t.Helper()
+	if len(events) == 0 {
+		t.Fatalf("no events emitted")
+	}
+	last := events[len(events)-1]
+	if last.Type != agent.EventTypeCommandApplied {
+		t.Fatalf("last event must be command_applied, got=%s", last.Type)
+	}
+	if last.CommandKind != want {
+		t.Fatalf("unexpected command kind: got=%s want=%s", last.CommandKind, want)
+	}
 }
