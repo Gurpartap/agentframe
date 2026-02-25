@@ -27,8 +27,8 @@ func (s *Store) Save(ctx context.Context, state agent.RunState) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
-	if state.ID == "" {
-		return fmt.Errorf("%w: save state with empty id", agent.ErrInvalidRunID)
+	if err := agent.ValidateRunState(state); err != nil {
+		return err
 	}
 
 	s.mu.Lock()

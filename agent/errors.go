@@ -11,6 +11,8 @@ var (
 	ErrRunVersionConflict = errors.New("run version conflict")
 	// ErrInvalidRunStateTransition is returned when a run state transition violates lifecycle rules.
 	ErrInvalidRunStateTransition = errors.New("invalid run state transition")
+	// ErrRunStateInvalid is returned when run state payload violates required structural contracts.
+	ErrRunStateInvalid = errors.New("run state is invalid")
 	// ErrRunNotContinuable is returned when continue is requested for a terminal run.
 	ErrRunNotContinuable = errors.New("run is not continuable")
 	// ErrRunNotCancellable is returned when cancel is requested for a terminal run.

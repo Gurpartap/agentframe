@@ -70,8 +70,107 @@ func TestStore_SaveRejectsEmptyRunID(t *testing.T) {
 	err := store.Save(context.Background(), agent.RunState{
 		Status: agent.RunStatusPending,
 	})
+	if !errors.Is(err, agent.ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", err)
+	}
 	if !errors.Is(err, agent.ErrInvalidRunID) {
-		t.Fatalf("expected ErrInvalidRunID, got %v", err)
+		t.Fatalf("expected ErrInvalidRunID compatibility, got %v", err)
+	}
+	if _, loadErr := store.Load(context.Background(), agent.RunID("probe-empty-id")); !errors.Is(loadErr, agent.ErrRunNotFound) {
+		t.Fatalf("expected ErrRunNotFound after invalid save, got %v", loadErr)
+	}
+}
+
+func TestStore_SaveRejectsStructurallyInvalidRunStateWithoutSideEffects(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name             string
+		state            agent.RunState
+		probeRunID       agent.RunID
+		wantInvalidRunID bool
+	}{
+		{
+			name: "negative step",
+			state: agent.RunState{
+				ID:      "run-invalid-step",
+				Version: 0,
+				Step:    -1,
+				Status:  agent.RunStatusPending,
+			},
+			probeRunID: "run-invalid-step",
+		},
+		{
+			name: "negative version",
+			state: agent.RunState{
+				ID:      "run-invalid-version",
+				Version: -1,
+				Step:    0,
+				Status:  agent.RunStatusPending,
+			},
+			probeRunID: "run-invalid-version",
+		},
+		{
+			name: "empty status",
+			state: agent.RunState{
+				ID:      "run-invalid-status-empty",
+				Version: 0,
+				Step:    0,
+				Status:  "",
+			},
+			probeRunID: "run-invalid-status-empty",
+		},
+		{
+			name: "unknown status",
+			state: agent.RunState{
+				ID:      "run-invalid-status-unknown",
+				Version: 0,
+				Step:    0,
+				Status:  agent.RunStatus("mystery"),
+			},
+			probeRunID: "run-invalid-status-unknown",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := runstoreinmem.New()
+			seed := agent.RunState{
+				ID:      "seed-run",
+				Version: 0,
+				Step:    0,
+				Status:  agent.RunStatusPending,
+			}
+			if err := store.Save(context.Background(), seed); err != nil {
+				t.Fatalf("seed save: %v", err)
+			}
+			persistedBefore, err := store.Load(context.Background(), seed.ID)
+			if err != nil {
+				t.Fatalf("load seeded state: %v", err)
+			}
+
+			err = store.Save(context.Background(), tc.state)
+			if !errors.Is(err, agent.ErrRunStateInvalid) {
+				t.Fatalf("expected ErrRunStateInvalid, got %v", err)
+			}
+			if tc.wantInvalidRunID && !errors.Is(err, agent.ErrInvalidRunID) {
+				t.Fatalf("expected ErrInvalidRunID compatibility, got %v", err)
+			}
+			if _, loadErr := store.Load(context.Background(), tc.probeRunID); !errors.Is(loadErr, agent.ErrRunNotFound) {
+				t.Fatalf("expected ErrRunNotFound for rejected state probe load, got %v", loadErr)
+			}
+
+			persistedAfter, err := store.Load(context.Background(), seed.ID)
+			if err != nil {
+				t.Fatalf("reload seeded state: %v", err)
+			}
+			if !reflect.DeepEqual(persistedAfter, persistedBefore) {
+				t.Fatalf("persisted seeded state changed after rejected save: got=%+v want=%+v", persistedAfter, persistedBefore)
+			}
+		})
 	}
 }
 
