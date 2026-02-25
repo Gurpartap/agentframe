@@ -19,7 +19,11 @@ func New() *Sink {
 	return &Sink{events: make([]agent.Event, 0)}
 }
 
-func (s *Sink) Publish(_ context.Context, event agent.Event) error {
+func (s *Sink) Publish(ctx context.Context, event agent.Event) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

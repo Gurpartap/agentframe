@@ -3,7 +3,9 @@ package inmem_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
+	"time"
 
 	"agentruntime/agent"
 	runstoreinmem "agentruntime/runstore/inmem"
@@ -58,5 +60,114 @@ func TestStore_SaveVersioningAndConflict(t *testing.T) {
 	}
 	if latest.Version != secondSnapshot.Version || latest.Step != secondSnapshot.Step {
 		t.Fatalf("state changed after stale write attempt: got=%+v want=%+v", latest, secondSnapshot)
+	}
+}
+
+func TestStore_SaveFailsFastOnDoneContext(t *testing.T) {
+	t.Parallel()
+
+	newCanceledContext := func() context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx
+	}
+	newDeadlineContext := func() context.Context {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		cancel()
+		return ctx
+	}
+
+	tests := []struct {
+		name       string
+		newContext func() context.Context
+		wantErr    error
+	}{
+		{
+			name:       "canceled",
+			newContext: newCanceledContext,
+			wantErr:    context.Canceled,
+		},
+		{
+			name:       "deadline_exceeded",
+			newContext: newDeadlineContext,
+			wantErr:    context.DeadlineExceeded,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := runstoreinmem.New()
+			state := agent.RunState{
+				ID:     agent.RunID("run-fast-fail-save"),
+				Status: agent.RunStatusPending,
+			}
+
+			err := store.Save(tc.newContext(), state)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("expected %v, got %v", tc.wantErr, err)
+			}
+			if _, loadErr := store.Load(context.Background(), state.ID); !errors.Is(loadErr, agent.ErrRunNotFound) {
+				t.Fatalf("expected ErrRunNotFound after failed save, got %v", loadErr)
+			}
+		})
+	}
+}
+
+func TestStore_LoadFailsFastOnDoneContext(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	state := agent.RunState{
+		ID:     agent.RunID("run-fast-fail-load"),
+		Status: agent.RunStatusPending,
+	}
+	if err := store.Save(context.Background(), state); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	newCanceledContext := func() context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx
+	}
+	newDeadlineContext := func() context.Context {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		cancel()
+		return ctx
+	}
+
+	tests := []struct {
+		name       string
+		newContext func() context.Context
+		wantErr    error
+	}{
+		{
+			name:       "canceled",
+			newContext: newCanceledContext,
+			wantErr:    context.Canceled,
+		},
+		{
+			name:       "deadline_exceeded",
+			newContext: newDeadlineContext,
+			wantErr:    context.DeadlineExceeded,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			loaded, err := store.Load(tc.newContext(), state.ID)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("expected %v, got %v", tc.wantErr, err)
+			}
+			if !reflect.DeepEqual(loaded, agent.RunState{}) {
+				t.Fatalf("unexpected state on context failure: %+v", loaded)
+			}
+		})
 	}
 }

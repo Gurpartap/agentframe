@@ -20,7 +20,11 @@ func New() *Store {
 	return &Store{states: map[agent.RunID]agent.RunState{}}
 }
 
-func (s *Store) Save(_ context.Context, state agent.RunState) error {
+func (s *Store) Save(ctx context.Context, state agent.RunState) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -55,7 +59,11 @@ func (s *Store) Save(_ context.Context, state agent.RunState) error {
 	}
 }
 
-func (s *Store) Load(_ context.Context, runID agent.RunID) (agent.RunState, error) {
+func (s *Store) Load(ctx context.Context, runID agent.RunID) (agent.RunState, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return agent.RunState{}, ctxErr
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

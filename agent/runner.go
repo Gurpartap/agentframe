@@ -60,6 +60,13 @@ func publishEvent(ctx context.Context, sink EventSink, event Event) error {
 	return nil
 }
 
+func cancellationEventDescription(runErr error) string {
+	if runErr == nil {
+		return "run cancelled"
+	}
+	return runErr.Error()
+}
+
 // Dispatch executes a typed command against the run store.
 func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
 	if isNilCommand(cmd) {
@@ -164,12 +171,14 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 		})
 	}
 
-	if err := r.store.Save(ctx, state); err != nil {
+	ioCtx := context.WithoutCancel(ctx)
+
+	if err := r.store.Save(ioCtx, state); err != nil {
 		return RunResult{}, err
 	}
 	state.Version++
 	var eventErr error
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       runID,
 		Step:        0,
 		Type:        EventTypeRunStarted,
@@ -181,17 +190,25 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 		Tools:    input.Tools,
 	})
 
-	if saveErr := r.store.Save(ctx, finalState); saveErr != nil {
+	if saveErr := r.store.Save(ioCtx, finalState); saveErr != nil {
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
+	if finalState.Status == RunStatusCancelled {
+		eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
+			RunID:       runID,
+			Step:        finalState.Step,
+			Type:        EventTypeRunCancelled,
+			Description: cancellationEventDescription(runErr),
+		}))
+	}
 	finalState.Version++
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
 		Type:        EventTypeRunCheckpoint,
 		Description: "final state persisted",
 	}))
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
 		Type:        EventTypeCommandApplied,
@@ -215,7 +232,8 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 	if runID == "" {
 		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindContinue)
 	}
-	state, err := r.store.Load(ctx, runID)
+	ioCtx := context.WithoutCancel(ctx)
+	state, err := r.store.Load(ioCtx, runID)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -227,17 +245,25 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 		Tools:    cmd.Tools,
 	})
 	var eventErr error
-	if saveErr := r.store.Save(ctx, finalState); saveErr != nil {
+	if saveErr := r.store.Save(ioCtx, finalState); saveErr != nil {
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
+	if finalState.Status == RunStatusCancelled {
+		eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
+			RunID:       runID,
+			Step:        finalState.Step,
+			Type:        EventTypeRunCancelled,
+			Description: cancellationEventDescription(runErr),
+		}))
+	}
 	finalState.Version++
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
 		Type:        EventTypeRunCheckpoint,
 		Description: "continued run state persisted",
 	}))
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
 		Type:        EventTypeCommandApplied,
@@ -257,7 +283,8 @@ func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResu
 	if runID == "" {
 		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindCancel)
 	}
-	state, err := r.store.Load(ctx, runID)
+	ioCtx := context.WithoutCancel(ctx)
+	state, err := r.store.Load(ioCtx, runID)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -267,18 +294,18 @@ func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResu
 	if err := TransitionRunStatus(&state, RunStatusCancelled); err != nil {
 		return RunResult{State: state}, err
 	}
-	if err := r.store.Save(ctx, state); err != nil {
+	if err := r.store.Save(ioCtx, state); err != nil {
 		return RunResult{}, err
 	}
 	state.Version++
 	var eventErr error
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       runID,
 		Step:        state.Step,
 		Type:        EventTypeRunCancelled,
 		Description: "run cancelled",
 	}))
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       runID,
 		Step:        state.Step,
 		Type:        EventTypeCommandApplied,
@@ -300,7 +327,8 @@ func (r *Runner) dispatchSteer(ctx context.Context, cmd SteerCommand) (RunResult
 	if cmd.RunID == "" {
 		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindSteer)
 	}
-	state, err := r.store.Load(ctx, cmd.RunID)
+	ioCtx := context.WithoutCancel(ctx)
+	state, err := r.store.Load(ioCtx, cmd.RunID)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -311,18 +339,18 @@ func (r *Runner) dispatchSteer(ctx context.Context, cmd SteerCommand) (RunResult
 		Role:    RoleUser,
 		Content: cmd.Instruction,
 	})
-	if err := r.store.Save(ctx, state); err != nil {
+	if err := r.store.Save(ioCtx, state); err != nil {
 		return RunResult{}, err
 	}
 	state.Version++
 	var eventErr error
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       cmd.RunID,
 		Step:        state.Step,
 		Type:        EventTypeRunCheckpoint,
 		Description: "steered run state persisted",
 	}))
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       cmd.RunID,
 		Step:        state.Step,
 		Type:        EventTypeCommandApplied,
@@ -346,7 +374,8 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 	if cmd.RunID == "" {
 		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindFollowUp)
 	}
-	state, err := r.store.Load(ctx, cmd.RunID)
+	ioCtx := context.WithoutCancel(ctx)
+	state, err := r.store.Load(ioCtx, cmd.RunID)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -362,17 +391,25 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 		Tools:    cmd.Tools,
 	})
 	var eventErr error
-	if saveErr := r.store.Save(ctx, finalState); saveErr != nil {
+	if saveErr := r.store.Save(ioCtx, finalState); saveErr != nil {
 		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
+	if finalState.Status == RunStatusCancelled {
+		eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
+			RunID:       cmd.RunID,
+			Step:        finalState.Step,
+			Type:        EventTypeRunCancelled,
+			Description: cancellationEventDescription(runErr),
+		}))
+	}
 	finalState.Version++
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       cmd.RunID,
 		Step:        finalState.Step,
 		Type:        EventTypeRunCheckpoint,
 		Description: "follow-up run state persisted",
 	}))
-	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ioCtx, r.events, Event{
 		RunID:       cmd.RunID,
 		Step:        finalState.Step,
 		Type:        EventTypeCommandApplied,
