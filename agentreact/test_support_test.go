@@ -3,12 +3,12 @@ package agentreact_test
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sync"
 	"sync/atomic"
 
 	"agentruntime/agent"
 	"agentruntime/agentreact"
+	toolingregistry "agentruntime/tooling/registry"
 )
 
 type response struct {
@@ -49,41 +49,11 @@ func (m *scriptedModel) Generate(_ context.Context, _ agentreact.ModelRequest) (
 	return msg, nil
 }
 
-type handler func(ctx context.Context, arguments map[string]any) (string, error)
-
-type registry struct {
-	mu       sync.RWMutex
-	handlers map[string]handler
-}
+type handler = toolingregistry.Handler
+type registry = toolingregistry.Registry
 
 func newRegistry(initial map[string]handler) *registry {
-	handlers := make(map[string]handler, len(initial))
-	maps.Copy(handlers, initial)
-	return &registry{handlers: handlers}
-}
-
-func (r *registry) Register(name string, h handler) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.handlers[name] = h
-}
-
-func (r *registry) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
-	r.mu.RLock()
-	h, ok := r.handlers[call.Name]
-	r.mu.RUnlock()
-	if !ok {
-		return agent.ToolResult{}, fmt.Errorf("tool %q is not registered", call.Name)
-	}
-	content, err := h(ctx, call.Arguments)
-	if err != nil {
-		return agent.ToolResult{}, err
-	}
-	return agent.ToolResult{
-		CallID:  call.ID,
-		Name:    call.Name,
-		Content: content,
-	}, nil
+	return toolingregistry.New(initial)
 }
 
 type runStore struct {
