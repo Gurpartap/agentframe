@@ -277,3 +277,41 @@ func TestWrapToolExecutor_ContextDoneStopsWithoutAttempt(t *testing.T) {
 		t.Fatalf("unexpected attempts: %d", attempts)
 	}
 }
+
+func TestWrapModel_NilContextStopsWithoutAttempt(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	model := modelFunc(func(_ context.Context, _ agentreact.ModelRequest) (agent.Message, error) {
+		attempts++
+		return agent.Message{}, errors.New("unexpected call")
+	})
+	wrapped := WrapModel(model, Config{MaxAttempts: 5})
+
+	_, err := wrapped.Generate(nil, agentreact.ModelRequest{})
+	if !errors.Is(err, agent.ErrContextNil) {
+		t.Fatalf("expected ErrContextNil, got %v", err)
+	}
+	if attempts != 0 {
+		t.Fatalf("unexpected attempts: %d", attempts)
+	}
+}
+
+func TestWrapToolExecutor_NilContextStopsWithoutAttempt(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
+		attempts++
+		return agent.ToolResult{}, errors.New("unexpected call")
+	})
+	wrapped := WrapToolExecutor(executor, Config{MaxAttempts: 5})
+
+	_, err := wrapped.Execute(nil, agent.ToolCall{ID: "call-1", Name: "lookup"})
+	if !errors.Is(err, agent.ErrContextNil) {
+		t.Fatalf("expected ErrContextNil, got %v", err)
+	}
+	if attempts != 0 {
+		t.Fatalf("unexpected attempts: %d", attempts)
+	}
+}

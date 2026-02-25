@@ -53,6 +53,10 @@ func publishEvent(ctx context.Context, sink agent.EventSink, event agent.Event) 
 }
 
 func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
+	if ctx == nil {
+		return state, agent.ErrContextNil
+	}
+
 	maxSteps := input.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = DefaultMaxSteps

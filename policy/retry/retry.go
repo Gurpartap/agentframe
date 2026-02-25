@@ -31,6 +31,9 @@ type modelWrapper struct {
 }
 
 func (w *modelWrapper) Generate(ctx context.Context, request agentreact.ModelRequest) (agent.Message, error) {
+	if ctx == nil {
+		return agent.Message{}, agent.ErrContextNil
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return agent.Message{}, ctxErr
 	}
@@ -67,6 +70,9 @@ type toolExecutorWrapper struct {
 }
 
 func (w *toolExecutorWrapper) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	if ctx == nil {
+		return agent.ToolResult{}, agent.ErrContextNil
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return agent.ToolResult{}, ctxErr
 	}

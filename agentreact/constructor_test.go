@@ -3,6 +3,7 @@ package agentreact_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"agentruntime/agent"
@@ -86,5 +87,42 @@ func TestNew_NilEventSinkDefaultsToNoop(t *testing.T) {
 	}
 	if state.Output != "done" {
 		t.Fatalf("unexpected output: %q", state.Output)
+	}
+}
+
+func TestExecute_NilContextFailsFastWithoutEventEmission(t *testing.T) {
+	t.Parallel()
+
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "unexpected",
+		},
+	})
+	events := newEventSink()
+	loop, err := agentreact.New(model, newRegistry(nil), events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+
+	initial := agent.RunState{
+		ID:     "nil-context-execute",
+		Status: agent.RunStatusPending,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "hello"},
+		},
+	}
+	next, execErr := loop.Execute(nil, initial, agent.EngineInput{MaxSteps: 2})
+	if !errors.Is(execErr, agent.ErrContextNil) {
+		t.Fatalf("expected ErrContextNil, got %v", execErr)
+	}
+	if !reflect.DeepEqual(next, initial) {
+		t.Fatalf("state changed on nil-context rejection: got=%+v want=%+v", next, initial)
+	}
+	if model.index != 0 {
+		t.Fatalf("model should not be invoked on nil-context rejection, calls=%d", model.index)
+	}
+	if gotEvents := events.Events(); len(gotEvents) != 0 {
+		t.Fatalf("expected no events on nil-context rejection, got %d", len(gotEvents))
 	}
 }
