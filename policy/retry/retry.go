@@ -5,91 +5,55 @@ import (
 	"errors"
 
 	"agentruntime/agent"
-	"agentruntime/agentreact"
 )
 
-// Config controls retry behavior for wrapped model and tool execution calls.
+// Config controls retry behavior for wrapped engine execution calls.
 type Config struct {
 	MaxAttempts int
 	ShouldRetry func(error) bool
 }
 
-// WrapModel wraps a model with deterministic, error-only retries.
-func WrapModel(model agentreact.Model, cfg Config) agentreact.Model {
-	if model == nil {
+// WrapEngine wraps an engine with deterministic, error-only retries.
+func WrapEngine(engine agent.Engine, cfg Config) agent.Engine {
+	if engine == nil {
 		return nil
 	}
-	return &modelWrapper{
-		next: model,
+	return &engineWrapper{
+		next: engine,
 		cfg:  cfg,
 	}
 }
 
-type modelWrapper struct {
-	next agentreact.Model
+type engineWrapper struct {
+	next agent.Engine
 	cfg  Config
 }
 
-func (w *modelWrapper) Generate(ctx context.Context, request agentreact.ModelRequest) (agent.Message, error) {
+func (w *engineWrapper) Execute(ctx context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
 	if ctx == nil {
-		return agent.Message{}, agent.ErrContextNil
+		return state, agent.ErrContextNil
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return agent.Message{}, ctxErr
+		return state, ctxErr
 	}
 
 	attempts := normalizedAttempts(w.cfg.MaxAttempts)
+	baseState := agent.CloneRunState(state)
+	lastState := baseState
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		msg, err := w.next.Generate(ctx, request)
+		attemptState := agent.CloneRunState(baseState)
+		nextState, err := w.next.Execute(ctx, attemptState, input)
 		if err == nil {
-			return msg, nil
+			return nextState, nil
 		}
+		lastState = nextState
 		lastErr = err
 		if attempt == attempts || !shouldRetry(ctx, w.cfg, err) {
 			break
 		}
 	}
-	return agent.Message{}, lastErr
-}
-
-// WrapToolExecutor wraps a tool executor with deterministic, error-only retries.
-func WrapToolExecutor(executor agentreact.ToolExecutor, cfg Config) agentreact.ToolExecutor {
-	if executor == nil {
-		return nil
-	}
-	return &toolExecutorWrapper{
-		next: executor,
-		cfg:  cfg,
-	}
-}
-
-type toolExecutorWrapper struct {
-	next agentreact.ToolExecutor
-	cfg  Config
-}
-
-func (w *toolExecutorWrapper) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
-	if ctx == nil {
-		return agent.ToolResult{}, agent.ErrContextNil
-	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return agent.ToolResult{}, ctxErr
-	}
-
-	attempts := normalizedAttempts(w.cfg.MaxAttempts)
-	var lastErr error
-	for attempt := 1; attempt <= attempts; attempt++ {
-		result, err := w.next.Execute(ctx, call)
-		if err == nil {
-			return result, nil
-		}
-		lastErr = err
-		if attempt == attempts || !shouldRetry(ctx, w.cfg, err) {
-			break
-		}
-	}
-	return agent.ToolResult{}, lastErr
+	return lastState, lastErr
 }
 
 func normalizedAttempts(maxAttempts int) int {
