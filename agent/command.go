@@ -7,6 +7,8 @@ const (
 	CommandKindStart    CommandKind = "start"
 	CommandKindContinue CommandKind = "continue"
 	CommandKindCancel   CommandKind = "cancel"
+	CommandKindSteer    CommandKind = "steer"
+	CommandKindFollowUp CommandKind = "follow_up"
 )
 
 // Command is the typed runtime mutation contract.
@@ -41,4 +43,26 @@ type CancelCommand struct {
 
 func (CancelCommand) Kind() CommandKind {
 	return CommandKindCancel
+}
+
+// SteerCommand appends an instruction to a non-terminal run without executing the engine.
+type SteerCommand struct {
+	RunID       RunID
+	Instruction string
+}
+
+func (SteerCommand) Kind() CommandKind {
+	return CommandKindSteer
+}
+
+// FollowUpCommand appends a prompt to a non-terminal run and executes the engine.
+type FollowUpCommand struct {
+	RunID      RunID
+	UserPrompt string
+	MaxSteps   int
+	Tools      []ToolDefinition
+}
+
+func (FollowUpCommand) Kind() CommandKind {
+	return CommandKindFollowUp
 }

@@ -69,9 +69,23 @@ func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
 			return RunResult{}, ErrCommandNil
 		}
 		return r.dispatchCancel(ctx, *command)
+	case SteerCommand:
+		return r.dispatchSteer(ctx, command)
+	case *SteerCommand:
+		if command == nil {
+			return RunResult{}, ErrCommandNil
+		}
+		return r.dispatchSteer(ctx, *command)
+	case FollowUpCommand:
+		return r.dispatchFollowUp(ctx, command)
+	case *FollowUpCommand:
+		if command == nil {
+			return RunResult{}, ErrCommandNil
+		}
+		return r.dispatchFollowUp(ctx, *command)
 	default:
 		switch kind := cmd.Kind(); kind {
-		case CommandKindStart, CommandKindContinue, CommandKindCancel:
+		case CommandKindStart, CommandKindContinue, CommandKindCancel, CommandKindSteer, CommandKindFollowUp:
 			return RunResult{}, fmt.Errorf("%w: kind=%s payload=%T", ErrCommandInvalid, kind, cmd)
 		default:
 			return RunResult{}, fmt.Errorf("%w: %s", ErrCommandUnsupported, kind)
@@ -233,4 +247,93 @@ func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResu
 		Description: "cancel command applied",
 	})
 	return RunResult{State: state}, nil
+}
+
+// Steer appends a user instruction to a non-terminal run without engine execution.
+func (r *Runner) Steer(ctx context.Context, runID RunID, instruction string) (RunResult, error) {
+	return r.Dispatch(ctx, SteerCommand{
+		RunID:       runID,
+		Instruction: instruction,
+	})
+}
+
+func (r *Runner) dispatchSteer(ctx context.Context, cmd SteerCommand) (RunResult, error) {
+	state, err := r.store.Load(ctx, cmd.RunID)
+	if err != nil {
+		return RunResult{}, err
+	}
+	if isTerminalRunStatus(state.Status) {
+		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotContinuable, state.Status)
+	}
+	state.Messages = append(state.Messages, Message{
+		Role:    RoleUser,
+		Content: cmd.Instruction,
+	})
+	if err := r.store.Save(ctx, state); err != nil {
+		return RunResult{}, err
+	}
+	state.Version++
+	_ = r.events.Publish(ctx, Event{
+		RunID:       cmd.RunID,
+		Step:        state.Step,
+		Type:        EventTypeRunCheckpoint,
+		Description: "steered run state persisted",
+	})
+	_ = r.events.Publish(ctx, Event{
+		RunID:       cmd.RunID,
+		Step:        state.Step,
+		Type:        EventTypeCommandApplied,
+		CommandKind: CommandKindSteer,
+		Description: "steer command applied",
+	})
+	return RunResult{State: state}, nil
+}
+
+// FollowUp appends a user prompt to a non-terminal run and executes the engine.
+func (r *Runner) FollowUp(ctx context.Context, runID RunID, prompt string, maxSteps int, tools []ToolDefinition) (RunResult, error) {
+	return r.Dispatch(ctx, FollowUpCommand{
+		RunID:      runID,
+		UserPrompt: prompt,
+		MaxSteps:   maxSteps,
+		Tools:      tools,
+	})
+}
+
+func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (RunResult, error) {
+	state, err := r.store.Load(ctx, cmd.RunID)
+	if err != nil {
+		return RunResult{}, err
+	}
+	if isTerminalRunStatus(state.Status) {
+		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotContinuable, state.Status)
+	}
+	state.Messages = append(state.Messages, Message{
+		Role:    RoleUser,
+		Content: cmd.UserPrompt,
+	})
+	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
+		MaxSteps: cmd.MaxSteps,
+		Tools:    cmd.Tools,
+	})
+	if saveErr := r.store.Save(ctx, finalState); saveErr != nil {
+		if runErr != nil {
+			return RunResult{}, errors.Join(runErr, saveErr)
+		}
+		return RunResult{}, saveErr
+	}
+	finalState.Version++
+	_ = r.events.Publish(ctx, Event{
+		RunID:       cmd.RunID,
+		Step:        finalState.Step,
+		Type:        EventTypeRunCheckpoint,
+		Description: "follow-up run state persisted",
+	})
+	_ = r.events.Publish(ctx, Event{
+		RunID:       cmd.RunID,
+		Step:        finalState.Step,
+		Type:        EventTypeCommandApplied,
+		CommandKind: CommandKindFollowUp,
+		Description: "follow-up command applied",
+	})
+	return RunResult{State: finalState}, runErr
 }

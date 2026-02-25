@@ -175,6 +175,223 @@ func TestRunnerDispatch_RejectsNilUnknownAndInvalidCommands(t *testing.T) {
 	}
 }
 
+func TestRunnerSteer_AppendsTranscriptWithoutEngineExecution(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("dispatch-steer-run")
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusPending,
+		Step:   4,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "original"},
+		},
+	}
+
+	store := testkit.NewRunStore()
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	persistedInitial, err := store.Load(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("load initial: %v", err)
+	}
+
+	events := testkit.NewEventSink()
+	engine := &engineSpy{}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+	result, err := runner.Steer(context.Background(), runID, "new direction")
+	if err != nil {
+		t.Fatalf("steer returned error: %v", err)
+	}
+	if engine.calls != 0 {
+		t.Fatalf("engine should not execute for steer, calls=%d", engine.calls)
+	}
+	if result.State.Status != persistedInitial.Status {
+		t.Fatalf("unexpected status: got=%s want=%s", result.State.Status, persistedInitial.Status)
+	}
+	if result.State.Step != persistedInitial.Step {
+		t.Fatalf("unexpected step: got=%d want=%d", result.State.Step, persistedInitial.Step)
+	}
+	if result.State.Version != persistedInitial.Version+1 {
+		t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version+1)
+	}
+	if len(result.State.Messages) != len(persistedInitial.Messages)+1 {
+		t.Fatalf("unexpected message count: got=%d want=%d", len(result.State.Messages), len(persistedInitial.Messages)+1)
+	}
+	appended := result.State.Messages[len(result.State.Messages)-1]
+	if appended.Role != agent.RoleUser || appended.Content != "new direction" {
+		t.Fatalf("unexpected appended message: %+v", appended)
+	}
+
+	gotEvents := events.Events()
+	if len(gotEvents) != 2 {
+		t.Fatalf("unexpected event count: %d", len(gotEvents))
+	}
+	if gotEvents[0].Type != agent.EventTypeRunCheckpoint {
+		t.Fatalf("unexpected first event type: %s", gotEvents[0].Type)
+	}
+	if gotEvents[1].Type != agent.EventTypeCommandApplied {
+		t.Fatalf("unexpected second event type: %s", gotEvents[1].Type)
+	}
+	if gotEvents[1].CommandKind != agent.CommandKindSteer {
+		t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[1].CommandKind, agent.CommandKindSteer)
+	}
+}
+
+func TestRunnerFollowUp_AppendsTranscriptAndInvokesEngine(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("dispatch-follow-up-run")
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusPending,
+		Step:   2,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "original"},
+		},
+	}
+
+	store := testkit.NewRunStore()
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	persistedInitial, err := store.Load(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("load initial: %v", err)
+	}
+
+	events := testkit.NewEventSink()
+	engine := &engineSpy{
+		executeFn: func(_ context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
+			if len(state.Messages) != len(persistedInitial.Messages)+1 {
+				t.Fatalf("unexpected message count received by engine: got=%d want=%d", len(state.Messages), len(persistedInitial.Messages)+1)
+			}
+			last := state.Messages[len(state.Messages)-1]
+			if last.Role != agent.RoleUser || last.Content != "follow up prompt" {
+				t.Fatalf("engine received unexpected appended message: %+v", last)
+			}
+			if input.MaxSteps != 5 {
+				t.Fatalf("unexpected max steps: %d", input.MaxSteps)
+			}
+			if len(input.Tools) != 1 || input.Tools[0].Name != "lookup" {
+				t.Fatalf("unexpected tools: %+v", input.Tools)
+			}
+			next := state
+			next.Step++
+			next.Status = agent.RunStatusCompleted
+			next.Output = "done"
+			return next, nil
+		},
+	}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+	result, err := runner.FollowUp(context.Background(), runID, "follow up prompt", 5, []agent.ToolDefinition{{Name: "lookup"}})
+	if err != nil {
+		t.Fatalf("follow up returned error: %v", err)
+	}
+	if engine.calls != 1 {
+		t.Fatalf("engine should execute exactly once for follow up, calls=%d", engine.calls)
+	}
+	if result.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.Step != persistedInitial.Step+1 {
+		t.Fatalf("unexpected step: got=%d want=%d", result.State.Step, persistedInitial.Step+1)
+	}
+	if result.State.Version != persistedInitial.Version+1 {
+		t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version+1)
+	}
+	if len(result.State.Messages) != len(persistedInitial.Messages)+1 {
+		t.Fatalf("unexpected message count: got=%d want=%d", len(result.State.Messages), len(persistedInitial.Messages)+1)
+	}
+	appended := result.State.Messages[len(result.State.Messages)-1]
+	if appended.Role != agent.RoleUser || appended.Content != "follow up prompt" {
+		t.Fatalf("unexpected appended message: %+v", appended)
+	}
+
+	gotEvents := events.Events()
+	if len(gotEvents) != 2 {
+		t.Fatalf("unexpected event count: %d", len(gotEvents))
+	}
+	if gotEvents[0].Type != agent.EventTypeRunCheckpoint {
+		t.Fatalf("unexpected first event type: %s", gotEvents[0].Type)
+	}
+	if gotEvents[1].Type != agent.EventTypeCommandApplied {
+		t.Fatalf("unexpected second event type: %s", gotEvents[1].Type)
+	}
+	if gotEvents[1].CommandKind != agent.CommandKindFollowUp {
+		t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[1].CommandKind, agent.CommandKindFollowUp)
+	}
+}
+
+func TestRunnerSteerFollowUp_TerminalStateRejected(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("dispatch-terminal-steer-follow-up")
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusCompleted,
+		Step:   2,
+	}
+
+	cases := []struct {
+		name string
+		call func(context.Context, *agent.Runner) (agent.RunResult, error)
+	}{
+		{
+			name: "steer",
+			call: func(ctx context.Context, runner *agent.Runner) (agent.RunResult, error) {
+				return runner.Steer(ctx, runID, "instruction")
+			},
+		},
+		{
+			name: "follow_up",
+			call: func(ctx context.Context, runner *agent.Runner) (agent.RunResult, error) {
+				return runner.FollowUp(ctx, runID, "prompt", 3, nil)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := testkit.NewRunStore()
+			if err := store.Save(context.Background(), initial); err != nil {
+				t.Fatalf("seed store: %v", err)
+			}
+			persistedInitial, err := store.Load(context.Background(), runID)
+			if err != nil {
+				t.Fatalf("load initial: %v", err)
+			}
+
+			events := testkit.NewEventSink()
+			engine := &engineSpy{}
+			runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+			result, err := tc.call(context.Background(), runner)
+			if !errors.Is(err, agent.ErrRunNotContinuable) {
+				t.Fatalf("expected ErrRunNotContinuable, got %v", err)
+			}
+			if result.State.Status != persistedInitial.Status {
+				t.Fatalf("unexpected status: got=%s want=%s", result.State.Status, persistedInitial.Status)
+			}
+			if result.State.Version != persistedInitial.Version {
+				t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedInitial.Version)
+			}
+			if engine.calls != 0 {
+				t.Fatalf("engine should not execute on terminal rejection, calls=%d", engine.calls)
+			}
+			if gotEvents := events.Events(); len(gotEvents) != 0 {
+				t.Fatalf("unexpected events emitted: %d", len(gotEvents))
+			}
+		})
+	}
+}
+
 type unknownCommand struct{}
 
 func (unknownCommand) Kind() agent.CommandKind {
@@ -205,6 +422,39 @@ func newDispatchRunner(
 		IDGenerator: testkit.NewCounterIDGenerator("dispatch"),
 		RunStore:    store,
 		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+	return runner
+}
+
+type engineSpy struct {
+	calls     int
+	executeFn func(ctx context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error)
+}
+
+func (s *engineSpy) Execute(ctx context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
+	s.calls++
+	if s.executeFn == nil {
+		return state, nil
+	}
+	return s.executeFn(ctx, state, input)
+}
+
+func newDispatchRunnerWithEngine(
+	t *testing.T,
+	store *testkit.RunStore,
+	events *testkit.EventSink,
+	engine agent.Engine,
+) *agent.Runner {
+	t.Helper()
+
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: testkit.NewCounterIDGenerator("dispatch"),
+		RunStore:    store,
+		Engine:      engine,
 		EventSink:   events,
 	})
 	if err != nil {
