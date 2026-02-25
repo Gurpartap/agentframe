@@ -454,3 +454,268 @@ func TestConformance_CommandAppliedCancelOrdering(t *testing.T) {
 		t.Fatalf("unexpected command kind: got=%s want=%s", got[1].CommandKind, agent.CommandKindCancel)
 	}
 }
+
+func TestConformance_SteerThenFollowUpEventOrdering(t *testing.T) {
+	t.Parallel()
+
+	runID := agent.RunID("conformance-steer-followup-order")
+	store := newRunStore()
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusPending,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "seed"},
+		},
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "follow-up answer",
+		},
+	})
+	registry := newRegistry(map[string]handler{})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("steer-followup-order"),
+		RunStore:    store,
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	if _, err := runner.Steer(context.Background(), runID, "steer now"); err != nil {
+		t.Fatalf("steer returned error: %v", err)
+	}
+	if _, err := runner.FollowUp(context.Background(), runID, "follow up", 2, nil); err != nil {
+		t.Fatalf("follow up returned error: %v", err)
+	}
+
+	got := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	wantSteps := []int{0, 0, 1, 1, 1, 1}
+	if len(got) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(got), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if got[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, got[i].Type, wantTypes[i])
+		}
+		if got[i].Step != wantSteps[i] {
+			t.Fatalf("event[%d] step mismatch: got=%d want=%d", i, got[i].Step, wantSteps[i])
+		}
+		if got[i].RunID != runID {
+			t.Fatalf("event[%d] run_id mismatch: got=%s want=%s", i, got[i].RunID, runID)
+		}
+	}
+	if got[1].CommandKind != agent.CommandKindSteer {
+		t.Fatalf("unexpected steer command kind: got=%s want=%s", got[1].CommandKind, agent.CommandKindSteer)
+	}
+	if got[5].CommandKind != agent.CommandKindFollowUp {
+		t.Fatalf("unexpected follow-up command kind: got=%s want=%s", got[5].CommandKind, agent.CommandKindFollowUp)
+	}
+}
+
+func TestConformance_TranscriptAppendOnlyAcrossRunSteerFollowUp(t *testing.T) {
+	t.Parallel()
+
+	runID := agent.RunID("conformance-append-run-steer-followup")
+	store := newRunStore()
+	events := newEventSink()
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "need tool",
+				ToolCalls: []agent.ToolCall{
+					{
+						ID:   "call-1",
+						Name: "lookup",
+					},
+				},
+			},
+		},
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "final after follow up",
+			},
+		},
+	)
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			return "tool-value", nil
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("append-run-steer-followup"),
+		RunStore:    store,
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	initialResult, initialErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      runID,
+		UserPrompt: "start",
+		MaxSteps:   1,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if !errors.Is(initialErr, agent.ErrMaxStepsExceeded) {
+		t.Fatalf("expected ErrMaxStepsExceeded, got %v", initialErr)
+	}
+	if initialResult.State.Status != agent.RunStatusMaxStepsExceeded {
+		t.Fatalf("unexpected initial status: %s", initialResult.State.Status)
+	}
+
+	runPrefix := agent.CloneMessages(initialResult.State.Messages)
+	steeredResult, err := runner.Steer(context.Background(), runID, "steer instruction")
+	if err != nil {
+		t.Fatalf("steer returned error: %v", err)
+	}
+	if len(steeredResult.State.Messages) != len(runPrefix)+1 {
+		t.Fatalf("unexpected steered message count: got=%d want=%d", len(steeredResult.State.Messages), len(runPrefix)+1)
+	}
+	if !reflect.DeepEqual(steeredResult.State.Messages[:len(runPrefix)], runPrefix) {
+		t.Fatalf("steer mutated transcript prefix")
+	}
+	if steeredResult.State.Messages[len(runPrefix)].Role != agent.RoleUser || steeredResult.State.Messages[len(runPrefix)].Content != "steer instruction" {
+		t.Fatalf("unexpected steer-appended message: %+v", steeredResult.State.Messages[len(runPrefix)])
+	}
+
+	steerPrefix := agent.CloneMessages(steeredResult.State.Messages)
+	followUpResult, err := runner.FollowUp(context.Background(), runID, "follow up prompt", 3, []agent.ToolDefinition{
+		{Name: "lookup"},
+	})
+	if err != nil {
+		t.Fatalf("follow up returned error: %v", err)
+	}
+	if followUpResult.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected follow-up status: %s", followUpResult.State.Status)
+	}
+	if len(followUpResult.State.Messages) <= len(steerPrefix) {
+		t.Fatalf("expected transcript growth after follow up")
+	}
+	if !reflect.DeepEqual(followUpResult.State.Messages[:len(steerPrefix)], steerPrefix) {
+		t.Fatalf("follow up mutated transcript prefix")
+	}
+	if followUpResult.State.Messages[len(steerPrefix)].Role != agent.RoleUser || followUpResult.State.Messages[len(steerPrefix)].Content != "follow up prompt" {
+		t.Fatalf("unexpected follow-up appended message: %+v", followUpResult.State.Messages[len(steerPrefix)])
+	}
+}
+
+func TestConformance_DeterministicUnderIdenticalScriptedInputs(t *testing.T) {
+	t.Parallel()
+
+	runOnce := func(t *testing.T) (agent.RunResult, agent.RunResult, agent.RunResult, []agent.Event) {
+		t.Helper()
+
+		runID := agent.RunID("conformance-deterministic-run")
+		store := newRunStore()
+		events := newEventSink()
+		model := newScriptedModel(
+			response{
+				Message: agent.Message{
+					Role:    agent.RoleAssistant,
+					Content: "need tool",
+					ToolCalls: []agent.ToolCall{
+						{
+							ID:   "call-1",
+							Name: "lookup",
+						},
+					},
+				},
+			},
+			response{
+				Message: agent.Message{
+					Role:    agent.RoleAssistant,
+					Content: "final deterministic answer",
+				},
+			},
+		)
+		registry := newRegistry(map[string]handler{
+			"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+				return "tool-value", nil
+			},
+		})
+		loop, err := agentreact.New(model, registry, events)
+		if err != nil {
+			t.Fatalf("new loop: %v", err)
+		}
+		runner, err := agent.NewRunner(agent.Dependencies{
+			IDGenerator: newCounterIDGenerator("deterministic"),
+			RunStore:    store,
+			Engine:      loop,
+			EventSink:   events,
+		})
+		if err != nil {
+			t.Fatalf("new runner: %v", err)
+		}
+
+		runResult, runErr := runner.Run(context.Background(), agent.RunInput{
+			RunID:      runID,
+			UserPrompt: "start",
+			MaxSteps:   1,
+			Tools: []agent.ToolDefinition{
+				{Name: "lookup"},
+			},
+		})
+		if !errors.Is(runErr, agent.ErrMaxStepsExceeded) {
+			t.Fatalf("expected ErrMaxStepsExceeded, got %v", runErr)
+		}
+
+		steerResult, err := runner.Steer(context.Background(), runID, "steer deterministic")
+		if err != nil {
+			t.Fatalf("steer returned error: %v", err)
+		}
+
+		followUpResult, err := runner.FollowUp(context.Background(), runID, "follow up deterministic", 3, []agent.ToolDefinition{
+			{Name: "lookup"},
+		})
+		if err != nil {
+			t.Fatalf("follow up returned error: %v", err)
+		}
+
+		return runResult, steerResult, followUpResult, events.Events()
+	}
+
+	firstRun, firstSteer, firstFollowUp, firstEvents := runOnce(t)
+	secondRun, secondSteer, secondFollowUp, secondEvents := runOnce(t)
+
+	if !reflect.DeepEqual(secondRun, firstRun) {
+		t.Fatalf("run result mismatch under identical scripted inputs")
+	}
+	if !reflect.DeepEqual(secondSteer, firstSteer) {
+		t.Fatalf("steer result mismatch under identical scripted inputs")
+	}
+	if !reflect.DeepEqual(secondFollowUp, firstFollowUp) {
+		t.Fatalf("follow-up result mismatch under identical scripted inputs")
+	}
+	if !reflect.DeepEqual(secondEvents, firstEvents) {
+		t.Fatalf("event stream mismatch under identical scripted inputs")
+	}
+}
