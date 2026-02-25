@@ -76,7 +76,7 @@ func TestRunnerDispatch_ContinueWrapperParity(t *testing.T) {
 		Message: agent.Message{Role: agent.RoleAssistant, Content: "continued"},
 	})
 
-	wrapperResult, wrapperErr := wrapperRunner.Continue(context.Background(), runID, 3, nil)
+	wrapperResult, wrapperErr := wrapperRunner.Continue(context.Background(), runID, 3, nil, nil)
 	if wrapperErr != nil {
 		t.Fatalf("continue wrapper error: %v", wrapperErr)
 	}
@@ -375,7 +375,7 @@ func TestRunnerDispatch_InvalidInputMatrix(t *testing.T) {
 			name:    "nil_context_wrapper_continue",
 			wantErr: agent.ErrContextNil,
 			call: func(runner *agent.Runner) (agent.RunResult, error) {
-				return runner.Continue(nil, existingRunID, 3, nil)
+				return runner.Continue(nil, existingRunID, 3, nil, nil)
 			},
 		},
 		{
@@ -951,7 +951,7 @@ func TestRunnerDispatch_TerminalStateImmutabilityForMutatingCommands(t *testing.
 			name:    "continue",
 			wantErr: agent.ErrRunNotContinuable,
 			call: func(ctx context.Context, runner *agent.Runner) (agent.RunResult, error) {
-				return runner.Continue(ctx, runID, 3, nil)
+				return runner.Continue(ctx, runID, 3, nil, nil)
 			},
 		},
 		{
@@ -1017,6 +1017,215 @@ func TestRunnerDispatch_TerminalStateImmutabilityForMutatingCommands(t *testing.
 			}
 		})
 	}
+}
+
+func TestRunnerDispatch_SuspendedResolutionGating(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("dispatch-suspended-resolution-gating")
+	seedState := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusSuspended,
+		Step:   4,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "seed"},
+		},
+		PendingRequirement: &agent.PendingRequirement{
+			ID:   "req-approval",
+			Kind: agent.RequirementKindApproval,
+		},
+	}
+
+	newFixture := func(t *testing.T) (*agent.Runner, *runstoreinmem.Store, *eventinginmem.Sink, *engineSpy, agent.RunState) {
+		t.Helper()
+
+		store := runstoreinmem.New()
+		if err := store.Save(context.Background(), seedState); err != nil {
+			t.Fatalf("seed store: %v", err)
+		}
+		persistedSeed, err := store.Load(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("load seeded state: %v", err)
+		}
+		events := eventinginmem.New()
+		engine := &engineSpy{}
+		runner := newDispatchRunnerWithEngine(t, store, events, engine)
+		return runner, store, events, engine, persistedSeed
+	}
+
+	t.Run("continue_missing_resolution", func(t *testing.T) {
+		t.Parallel()
+
+		runner, store, events, engine, persistedSeed := newFixture(t)
+		result, err := runner.Dispatch(context.Background(), agent.ContinueCommand{
+			RunID:    runID,
+			MaxSteps: 3,
+		})
+		if !errors.Is(err, agent.ErrResolutionRequired) {
+			t.Fatalf("expected ErrResolutionRequired, got %v", err)
+		}
+		if !reflect.DeepEqual(result.State, persistedSeed) {
+			t.Fatalf("state mismatch: got=%+v want=%+v", result.State, persistedSeed)
+		}
+		if engine.calls != 0 {
+			t.Fatalf("engine should not execute, calls=%d", engine.calls)
+		}
+		if gotEvents := events.Events(); len(gotEvents) != 0 {
+			t.Fatalf("unexpected events emitted: %d", len(gotEvents))
+		}
+		loaded, err := store.Load(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("load state: %v", err)
+		}
+		if !reflect.DeepEqual(loaded, persistedSeed) {
+			t.Fatalf("persisted state mutated: got=%+v want=%+v", loaded, persistedSeed)
+		}
+	})
+
+	t.Run("continue_invalid_resolution", func(t *testing.T) {
+		t.Parallel()
+
+		runner, store, events, engine, persistedSeed := newFixture(t)
+		result, err := runner.Dispatch(context.Background(), agent.ContinueCommand{
+			RunID:    runID,
+			MaxSteps: 3,
+			Resolution: &agent.Resolution{
+				RequirementID: "req-approval",
+				Kind:          agent.RequirementKindApproval,
+				Outcome:       agent.ResolutionOutcomeProvided,
+			},
+		})
+		if !errors.Is(err, agent.ErrResolutionInvalid) {
+			t.Fatalf("expected ErrResolutionInvalid, got %v", err)
+		}
+		if !reflect.DeepEqual(result.State, persistedSeed) {
+			t.Fatalf("state mismatch: got=%+v want=%+v", result.State, persistedSeed)
+		}
+		if engine.calls != 0 {
+			t.Fatalf("engine should not execute, calls=%d", engine.calls)
+		}
+		if gotEvents := events.Events(); len(gotEvents) != 0 {
+			t.Fatalf("unexpected events emitted: %d", len(gotEvents))
+		}
+		loaded, err := store.Load(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("load state: %v", err)
+		}
+		if !reflect.DeepEqual(loaded, persistedSeed) {
+			t.Fatalf("persisted state mutated: got=%+v want=%+v", loaded, persistedSeed)
+		}
+	})
+
+	t.Run("continue_valid_resolution_executes_from_running", func(t *testing.T) {
+		t.Parallel()
+
+		runner, store, events, engine, persistedSeed := newFixture(t)
+		engine.executeFn = func(_ context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
+			if state.Status != agent.RunStatusRunning {
+				t.Fatalf("expected running status at engine boundary, got %s", state.Status)
+			}
+			if state.PendingRequirement != nil {
+				t.Fatalf("pending requirement should be cleared before engine execution")
+			}
+			if input.Resolution == nil {
+				t.Fatalf("continue resolution must be forwarded to engine input")
+			}
+			if input.Resolution.RequirementID != "req-approval" {
+				t.Fatalf("unexpected resolution requirement id: %q", input.Resolution.RequirementID)
+			}
+			if input.Resolution.Kind != agent.RequirementKindApproval {
+				t.Fatalf("unexpected resolution kind: %s", input.Resolution.Kind)
+			}
+			if input.Resolution.Outcome != agent.ResolutionOutcomeApproved {
+				t.Fatalf("unexpected resolution outcome: %s", input.Resolution.Outcome)
+			}
+			next := state
+			next.Step++
+			next.Status = agent.RunStatusCompleted
+			next.Output = "done"
+			return next, nil
+		}
+
+		result, err := runner.Dispatch(context.Background(), agent.ContinueCommand{
+			RunID:    runID,
+			MaxSteps: 3,
+			Resolution: &agent.Resolution{
+				RequirementID: "req-approval",
+				Kind:          agent.RequirementKindApproval,
+				Outcome:       agent.ResolutionOutcomeApproved,
+			},
+		})
+		if err != nil {
+			t.Fatalf("continue returned error: %v", err)
+		}
+		if engine.calls != 1 {
+			t.Fatalf("engine should execute exactly once, calls=%d", engine.calls)
+		}
+		if result.State.Status != agent.RunStatusCompleted {
+			t.Fatalf("unexpected status: %s", result.State.Status)
+		}
+		if result.State.PendingRequirement != nil {
+			t.Fatalf("pending requirement must be cleared after continue")
+		}
+		if result.State.Version != persistedSeed.Version+1 {
+			t.Fatalf("unexpected version: got=%d want=%d", result.State.Version, persistedSeed.Version+1)
+		}
+		if len(result.State.Messages) != len(persistedSeed.Messages) {
+			t.Fatalf("unexpected transcript mutation")
+		}
+		assertEventTypes(t, events.Events(), []agent.EventType{
+			agent.EventTypeRunCheckpoint,
+			agent.EventTypeCommandApplied,
+		})
+		assertCommandKind(t, events.Events(), agent.CommandKindContinue)
+		loaded, err := store.Load(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("load state: %v", err)
+		}
+		if !reflect.DeepEqual(loaded, result.State) {
+			t.Fatalf("persisted state mismatch: got=%+v want=%+v", loaded, result.State)
+		}
+	})
+
+	t.Run("steer_and_follow_up_rejected_while_suspended", func(t *testing.T) {
+		t.Parallel()
+
+		runner, store, events, engine, persistedSeed := newFixture(t)
+		steerResult, steerErr := runner.Dispatch(context.Background(), agent.SteerCommand{
+			RunID:       runID,
+			Instruction: "new direction",
+		})
+		if !errors.Is(steerErr, agent.ErrResolutionRequired) {
+			t.Fatalf("expected steer ErrResolutionRequired, got %v", steerErr)
+		}
+		if !reflect.DeepEqual(steerResult.State, persistedSeed) {
+			t.Fatalf("steer state mismatch: got=%+v want=%+v", steerResult.State, persistedSeed)
+		}
+		followUpResult, followUpErr := runner.Dispatch(context.Background(), agent.FollowUpCommand{
+			RunID:      runID,
+			UserPrompt: "follow up",
+			MaxSteps:   3,
+		})
+		if !errors.Is(followUpErr, agent.ErrResolutionRequired) {
+			t.Fatalf("expected follow-up ErrResolutionRequired, got %v", followUpErr)
+		}
+		if !reflect.DeepEqual(followUpResult.State, persistedSeed) {
+			t.Fatalf("follow-up state mismatch: got=%+v want=%+v", followUpResult.State, persistedSeed)
+		}
+		if engine.calls != 0 {
+			t.Fatalf("engine should not execute, calls=%d", engine.calls)
+		}
+		if gotEvents := events.Events(); len(gotEvents) != 0 {
+			t.Fatalf("unexpected events emitted: %d", len(gotEvents))
+		}
+		loaded, err := store.Load(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("load state: %v", err)
+		}
+		if !reflect.DeepEqual(loaded, persistedSeed) {
+			t.Fatalf("persisted state mutated: got=%+v want=%+v", loaded, persistedSeed)
+		}
+	})
 }
 
 type unknownCommand struct{}

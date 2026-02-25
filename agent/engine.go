@@ -9,6 +9,7 @@ type Engine interface {
 
 // EngineInput provides execution constraints and tool contracts.
 type EngineInput struct {
-	MaxSteps int
-	Tools    []ToolDefinition
+	MaxSteps   int
+	Tools      []ToolDefinition
+	Resolution *Resolution
 }

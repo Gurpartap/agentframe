@@ -114,7 +114,7 @@ func TestAPIErgonomics_ContinueAfterMaxStepsPath(t *testing.T) {
 		t.Fatalf("unexpected initial status: %s", initial.State.Status)
 	}
 
-	continued, err := runner.Continue(context.Background(), initial.State.ID, 3, []agent.ToolDefinition{{Name: "lookup"}})
+	continued, err := runner.Continue(context.Background(), initial.State.ID, 3, []agent.ToolDefinition{{Name: "lookup"}}, nil)
 	if err != nil {
 		t.Fatalf("continue returned error: %v", err)
 	}

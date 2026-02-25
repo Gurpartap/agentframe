@@ -23,6 +23,14 @@ func TestValidateEventMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "valid run suspended",
+			event: Event{
+				RunID: "run-1",
+				Step:  2,
+				Type:  EventTypeRunSuspended,
+			},
+		},
+		{
 			name: "valid command applied",
 			event: Event{
 				RunID:       "run-1",
@@ -268,6 +276,16 @@ func TestValidateEventMatrix(t *testing.T) {
 				},
 			},
 			wantErr: "event is invalid: field=tool_result reason=forbidden type=run_checkpoint run_id=\"run-1\" step=3",
+		},
+		{
+			name: "run suspended forbids command kind",
+			event: Event{
+				RunID:       "run-1",
+				Step:        1,
+				Type:        EventTypeRunSuspended,
+				CommandKind: CommandKindContinue,
+			},
+			wantErr: "event is invalid: field=command_kind reason=forbidden value=\"continue\" type=run_suspended run_id=\"run-1\" step=1",
 		},
 	}
 

@@ -75,6 +75,12 @@ func TestTransitionRunStatus_Valid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			state := RunState{Status: tc.from}
+			if tc.to == RunStatusSuspended {
+				state.PendingRequirement = &PendingRequirement{
+					ID:   "req-transition",
+					Kind: RequirementKindApproval,
+				}
+			}
 			if err := TransitionRunStatus(&state, tc.to); err != nil {
 				t.Fatalf("expected transition %s -> %s to be valid, got %v", tc.from, tc.to, err)
 			}
@@ -82,6 +88,21 @@ func TestTransitionRunStatus_Valid(t *testing.T) {
 				t.Fatalf("unexpected status after transition: got=%s want=%s", state.Status, tc.to)
 			}
 		})
+	}
+}
+
+func TestTransitionRunStatus_SuspendedRequiresPendingRequirement(t *testing.T) {
+	t.Parallel()
+
+	state := RunState{
+		Status: RunStatusRunning,
+	}
+	err := TransitionRunStatus(&state, RunStatusSuspended)
+	if !errors.Is(err, ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", err)
+	}
+	if state.Status != RunStatusRunning {
+		t.Fatalf("status changed on invalid suspension transition: got=%s want=%s", state.Status, RunStatusRunning)
 	}
 }
 

@@ -12,11 +12,12 @@ const (
 
 // Message is the shared transport object passed between runtime, model, and tools.
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role        Role                `json:"role"`
+	Content     string              `json:"content,omitempty"`
+	Name        string              `json:"name,omitempty"`
+	ToolCallID  string              `json:"tool_call_id,omitempty"`
+	ToolCalls   []ToolCall          `json:"tool_calls,omitempty"`
+	Requirement *PendingRequirement `json:"requirement,omitempty"`
 }
 
 // CloneMessage returns a deep copy suitable for isolation across component boundaries.
@@ -27,6 +28,10 @@ func CloneMessage(in Message) Message {
 		for i := range in.ToolCalls {
 			out.ToolCalls[i] = CloneToolCall(in.ToolCalls[i])
 		}
+	}
+	if in.Requirement != nil {
+		requirementCopy := *in.Requirement
+		out.Requirement = &requirementCopy
 	}
 	return out
 }

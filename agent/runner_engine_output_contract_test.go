@@ -113,7 +113,7 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 				}
 				runner := newDispatchRunnerWithEngine(t, store, events, engine)
 
-				result, runErr := runner.Continue(context.Background(), runID, 3, nil)
+				result, runErr := runner.Continue(context.Background(), runID, 3, nil, nil)
 				if !errors.Is(runErr, agent.ErrEngineOutputContractViolation) {
 					t.Fatalf("expected ErrEngineOutputContractViolation, got %v", runErr)
 				}

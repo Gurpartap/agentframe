@@ -189,7 +189,7 @@ func TestRunnerContinue_TerminalStatesRejected(t *testing.T) {
 				t.Fatalf("load initial state: %v", err)
 			}
 
-			result, err := runner.Continue(context.Background(), initial.ID, 3, nil)
+			result, err := runner.Continue(context.Background(), initial.ID, 3, nil, nil)
 			if !errors.Is(err, agent.ErrRunNotContinuable) {
 				t.Fatalf("expected ErrRunNotContinuable, got %v", err)
 			}
@@ -286,7 +286,7 @@ func TestRunnerContinue_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := runner.Continue(ctx, initial.ID, 3, nil)
+	result, err := runner.Continue(ctx, initial.ID, 3, nil, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -383,6 +383,302 @@ func TestRunnerFollowUp_CancelledContext(t *testing.T) {
 		agent.EventTypeCommandApplied,
 	})
 	assertCommandKind(t, gotEvents, agent.CommandKindFollowUp)
+}
+
+func TestRunnerContinue_SuspendedRunRequiresResolution(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
+	engine := &engineSpy{}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+	initial := agent.RunState{
+		ID:     agent.RunID("run-suspended-missing-resolution"),
+		Status: agent.RunStatusSuspended,
+		Step:   2,
+		PendingRequirement: &agent.PendingRequirement{
+			ID:   "req-1",
+			Kind: agent.RequirementKindApproval,
+		},
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+	persistedInitial, err := store.Load(context.Background(), initial.ID)
+	if err != nil {
+		t.Fatalf("load initial state: %v", err)
+	}
+
+	result, err := runner.Continue(context.Background(), initial.ID, 3, nil, nil)
+	if !errors.Is(err, agent.ErrResolutionRequired) {
+		t.Fatalf("expected ErrResolutionRequired, got %v", err)
+	}
+	if !reflect.DeepEqual(result.State, persistedInitial) {
+		t.Fatalf("result state mismatch: got=%+v want=%+v", result.State, persistedInitial)
+	}
+	if engine.calls != 0 {
+		t.Fatalf("engine should not execute on resolution-required rejection, calls=%d", engine.calls)
+	}
+	if gotEvents := events.Events(); len(gotEvents) != 0 {
+		t.Fatalf("unexpected events on rejection: %d", len(gotEvents))
+	}
+}
+
+func TestRunnerContinue_NonSuspendedRejectsResolution(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
+	engine := &engineSpy{}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+	initial := agent.RunState{
+		ID:     agent.RunID("run-non-suspended-unexpected-resolution"),
+		Status: agent.RunStatusPending,
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+	persistedInitial, err := store.Load(context.Background(), initial.ID)
+	if err != nil {
+		t.Fatalf("load initial state: %v", err)
+	}
+
+	result, err := runner.Dispatch(context.Background(), agent.ContinueCommand{
+		RunID:    initial.ID,
+		MaxSteps: 3,
+		Resolution: &agent.Resolution{
+			RequirementID: "req-1",
+			Kind:          agent.RequirementKindApproval,
+			Outcome:       agent.ResolutionOutcomeApproved,
+		},
+	})
+	if !errors.Is(err, agent.ErrResolutionUnexpected) {
+		t.Fatalf("expected ErrResolutionUnexpected, got %v", err)
+	}
+	if !reflect.DeepEqual(result.State, persistedInitial) {
+		t.Fatalf("result state mismatch: got=%+v want=%+v", result.State, persistedInitial)
+	}
+	if engine.calls != 0 {
+		t.Fatalf("engine should not execute on unexpected-resolution rejection, calls=%d", engine.calls)
+	}
+	if gotEvents := events.Events(); len(gotEvents) != 0 {
+		t.Fatalf("unexpected events on rejection: %d", len(gotEvents))
+	}
+}
+
+func TestRunnerContinue_SuspendedRejectsInvalidResolution(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
+	engine := &engineSpy{}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+	initial := agent.RunState{
+		ID:     agent.RunID("run-suspended-invalid-resolution"),
+		Status: agent.RunStatusSuspended,
+		Step:   1,
+		PendingRequirement: &agent.PendingRequirement{
+			ID:   "req-1",
+			Kind: agent.RequirementKindApproval,
+		},
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+	persistedInitial, err := store.Load(context.Background(), initial.ID)
+	if err != nil {
+		t.Fatalf("load initial state: %v", err)
+	}
+
+	result, err := runner.Dispatch(context.Background(), agent.ContinueCommand{
+		RunID:    initial.ID,
+		MaxSteps: 3,
+		Resolution: &agent.Resolution{
+			RequirementID: "req-wrong",
+			Kind:          agent.RequirementKindApproval,
+			Outcome:       agent.ResolutionOutcomeApproved,
+		},
+	})
+	if !errors.Is(err, agent.ErrResolutionInvalid) {
+		t.Fatalf("expected ErrResolutionInvalid, got %v", err)
+	}
+	if !reflect.DeepEqual(result.State, persistedInitial) {
+		t.Fatalf("result state mismatch: got=%+v want=%+v", result.State, persistedInitial)
+	}
+	if engine.calls != 0 {
+		t.Fatalf("engine should not execute on invalid-resolution rejection, calls=%d", engine.calls)
+	}
+	if gotEvents := events.Events(); len(gotEvents) != 0 {
+		t.Fatalf("unexpected events on rejection: %d", len(gotEvents))
+	}
+}
+
+func TestRunnerSteerAndFollowUp_SuspendedRejected(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
+	engine := &engineSpy{}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+	initial := agent.RunState{
+		ID:     agent.RunID("run-suspended-steer-followup-rejected"),
+		Status: agent.RunStatusSuspended,
+		PendingRequirement: &agent.PendingRequirement{
+			ID:   "req-1",
+			Kind: agent.RequirementKindUserInput,
+		},
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+	persistedInitial, err := store.Load(context.Background(), initial.ID)
+	if err != nil {
+		t.Fatalf("load initial state: %v", err)
+	}
+
+	steerResult, steerErr := runner.Steer(context.Background(), initial.ID, "new direction")
+	if !errors.Is(steerErr, agent.ErrResolutionRequired) {
+		t.Fatalf("expected steer ErrResolutionRequired, got %v", steerErr)
+	}
+	if !reflect.DeepEqual(steerResult.State, persistedInitial) {
+		t.Fatalf("steer result state mismatch: got=%+v want=%+v", steerResult.State, persistedInitial)
+	}
+
+	followUpResult, followUpErr := runner.FollowUp(context.Background(), initial.ID, "follow up", 3, nil)
+	if !errors.Is(followUpErr, agent.ErrResolutionRequired) {
+		t.Fatalf("expected follow-up ErrResolutionRequired, got %v", followUpErr)
+	}
+	if !reflect.DeepEqual(followUpResult.State, persistedInitial) {
+		t.Fatalf("follow-up result state mismatch: got=%+v want=%+v", followUpResult.State, persistedInitial)
+	}
+	if engine.calls != 0 {
+		t.Fatalf("engine should not execute for suspended steer/follow-up rejections, calls=%d", engine.calls)
+	}
+	if gotEvents := events.Events(); len(gotEvents) != 0 {
+		t.Fatalf("unexpected events on rejection: %d", len(gotEvents))
+	}
+}
+
+func TestRunnerRunContinue_SuspendedResolutionFlow(t *testing.T) {
+	t.Parallel()
+
+	store := runstoreinmem.New()
+	events := eventinginmem.New()
+	engine := &engineSpy{}
+	engine.executeFn = func(_ context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
+		switch engine.calls {
+		case 1:
+			next := state
+			if err := agent.TransitionRunStatus(&next, agent.RunStatusRunning); err != nil {
+				t.Fatalf("transition to running: %v", err)
+			}
+			next.Step++
+			next.PendingRequirement = &agent.PendingRequirement{
+				ID:     "req-approval",
+				Kind:   agent.RequirementKindApproval,
+				Prompt: "approve execution",
+			}
+			if err := agent.TransitionRunStatus(&next, agent.RunStatusSuspended); err != nil {
+				t.Fatalf("transition to suspended: %v", err)
+			}
+			return next, nil
+		case 2:
+			if state.Status != agent.RunStatusRunning {
+				t.Fatalf("continue should execute from running status, got %s", state.Status)
+			}
+			if state.PendingRequirement != nil {
+				t.Fatalf("continue should clear pending requirement before execution")
+			}
+			next := state
+			next.Step++
+			message := agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "approved and completed",
+			}
+			next.Messages = append(next.Messages, message)
+			if err := agent.TransitionRunStatus(&next, agent.RunStatusCompleted); err != nil {
+				t.Fatalf("transition to completed: %v", err)
+			}
+			next.Output = message.Content
+			return next, nil
+		default:
+			t.Fatalf("unexpected engine call count: %d", engine.calls)
+			return state, nil
+		}
+	}
+	runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+	runResult, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      "run-suspend-continue-flow",
+		UserPrompt: "start",
+		MaxSteps:   3,
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if runResult.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected run status: %s", runResult.State.Status)
+	}
+	if runResult.State.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement on suspended run")
+	}
+
+	prefix := agent.CloneMessages(runResult.State.Messages)
+	continueResult, continueErr := runner.Dispatch(context.Background(), agent.ContinueCommand{
+		RunID:    runResult.State.ID,
+		MaxSteps: 3,
+		Resolution: &agent.Resolution{
+			RequirementID: "req-approval",
+			Kind:          agent.RequirementKindApproval,
+			Outcome:       agent.ResolutionOutcomeApproved,
+		},
+	})
+	if continueErr != nil {
+		t.Fatalf("continue returned error: %v", continueErr)
+	}
+	if continueResult.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected continue status: %s", continueResult.State.Status)
+	}
+	if continueResult.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared after successful continue")
+	}
+	if continueResult.State.Version != runResult.State.Version+1 {
+		t.Fatalf("unexpected version after continue: got=%d want=%d", continueResult.State.Version, runResult.State.Version+1)
+	}
+	if len(continueResult.State.Messages) <= len(prefix) {
+		t.Fatalf("expected transcript growth after continue")
+	}
+	if !reflect.DeepEqual(continueResult.State.Messages[:len(prefix)], prefix) {
+		t.Fatalf("continue mutated transcript prefix")
+	}
+
+	loaded, err := store.Load(context.Background(), runResult.State.ID)
+	if err != nil {
+		t.Fatalf("load final state: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, continueResult.State) {
+		t.Fatalf("saved state mismatch: got=%+v want=%+v", loaded, continueResult.State)
+	}
+
+	gotEvents := events.Events()
+	assertEventTypes(t, gotEvents, []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeRunSuspended,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	})
+	if gotEvents[3].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected start command kind: %s", gotEvents[3].CommandKind)
+	}
+	if gotEvents[5].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected continue command kind: %s", gotEvents[5].CommandKind)
+	}
 }
 
 func newLifecycleRunner(t *testing.T, store *runstoreinmem.Store, events *eventinginmem.Sink) *agent.Runner {

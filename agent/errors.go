@@ -17,6 +17,12 @@ var (
 	ErrRunNotContinuable = errors.New("run is not continuable")
 	// ErrRunNotCancellable is returned when cancel is requested for a terminal run.
 	ErrRunNotCancellable = errors.New("run is not cancellable")
+	// ErrResolutionRequired is returned when suspended runs are continued without a resolution payload.
+	ErrResolutionRequired = errors.New("resolution is required")
+	// ErrResolutionInvalid is returned when resolution payload does not satisfy runtime contracts.
+	ErrResolutionInvalid = errors.New("resolution is invalid")
+	// ErrResolutionUnexpected is returned when resolution payload is provided for a non-suspended run.
+	ErrResolutionUnexpected = errors.New("resolution is unexpected")
 	// ErrCommandNil is returned when dispatch is called with a nil command.
 	ErrCommandNil = errors.New("command is nil")
 	// ErrContextNil is returned when runtime commands are invoked with a nil context.

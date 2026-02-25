@@ -70,6 +70,45 @@ func cancellationEventDescription(runErr error) string {
 	return runErr.Error()
 }
 
+func suspensionEventDescription(state RunState) string {
+	if state.PendingRequirement == nil {
+		return "run suspended"
+	}
+	return fmt.Sprintf(
+		"run suspended awaiting requirement kind=%s id=%q",
+		state.PendingRequirement.Kind,
+		state.PendingRequirement.ID,
+	)
+}
+
+func validateContinueResolution(state RunState, command ContinueCommand) error {
+	if state.Status != RunStatusSuspended {
+		if command.Resolution != nil {
+			return fmt.Errorf(
+				"%w: command=%s status=%s run_id=%q",
+				ErrResolutionUnexpected,
+				CommandKindContinue,
+				state.Status,
+				state.ID,
+			)
+		}
+		return nil
+	}
+	if command.Resolution == nil {
+		return fmt.Errorf(
+			"%w: command=%s status=%s run_id=%q",
+			ErrResolutionRequired,
+			CommandKindContinue,
+			state.Status,
+			state.ID,
+		)
+	}
+	if err := validateResolutionForRequirement(command.Resolution, state.PendingRequirement); err != nil {
+		return err
+	}
+	return nil
+}
+
 func validateEngineOutput(prev RunState, next RunState) error {
 	if next.ID != prev.ID {
 		return fmt.Errorf(
@@ -251,8 +290,9 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 	}))
 
 	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
-		MaxSteps: input.MaxSteps,
-		Tools:    CloneToolDefinitions(input.Tools),
+		MaxSteps:   input.MaxSteps,
+		Tools:      CloneToolDefinitions(input.Tools),
+		Resolution: nil,
 	})
 	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
 		return RunResult{}, errors.Join(contractErr, eventErr)
@@ -268,6 +308,14 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 			Step:        finalState.Step,
 			Type:        EventTypeRunCancelled,
 			Description: cancellationEventDescription(runErr),
+		}))
+	}
+	if finalState.Status == RunStatusSuspended {
+		eventErr = errors.Join(eventErr, publishEvent(sideEffectCtx(), r.events, Event{
+			RunID:       runID,
+			Step:        finalState.Step,
+			Type:        EventTypeRunSuspended,
+			Description: suspensionEventDescription(finalState),
 		}))
 	}
 	finalState.Version++
@@ -288,11 +336,18 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 }
 
 // Continue loads an existing run and executes additional engine steps.
-func (r *Runner) Continue(ctx context.Context, runID RunID, maxSteps int, tools []ToolDefinition) (RunResult, error) {
+func (r *Runner) Continue(
+	ctx context.Context,
+	runID RunID,
+	maxSteps int,
+	tools []ToolDefinition,
+	resolution *Resolution,
+) (RunResult, error) {
 	return r.Dispatch(ctx, ContinueCommand{
-		RunID:    runID,
-		MaxSteps: maxSteps,
-		Tools:    tools,
+		RunID:      runID,
+		MaxSteps:   maxSteps,
+		Tools:      tools,
+		Resolution: resolution,
 	})
 }
 
@@ -312,9 +367,19 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 	if isTerminalRunStatus(state.Status) {
 		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotContinuable, state.Status)
 	}
+	if err := validateContinueResolution(state, cmd); err != nil {
+		return RunResult{State: state}, err
+	}
+	if state.Status == RunStatusSuspended {
+		state.PendingRequirement = nil
+		if err := TransitionRunStatus(&state, RunStatusRunning); err != nil {
+			return RunResult{State: state}, err
+		}
+	}
 	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
-		MaxSteps: cmd.MaxSteps,
-		Tools:    CloneToolDefinitions(cmd.Tools),
+		MaxSteps:   cmd.MaxSteps,
+		Tools:      CloneToolDefinitions(cmd.Tools),
+		Resolution: cmd.Resolution,
 	})
 	var eventErr error
 	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
@@ -330,6 +395,14 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 			Step:        finalState.Step,
 			Type:        EventTypeRunCancelled,
 			Description: cancellationEventDescription(runErr),
+		}))
+	}
+	if finalState.Status == RunStatusSuspended {
+		eventErr = errors.Join(eventErr, publishEvent(sideEffectCtx(), r.events, Event{
+			RunID:       runID,
+			Step:        finalState.Step,
+			Type:        EventTypeRunSuspended,
+			Description: suspensionEventDescription(finalState),
 		}))
 	}
 	finalState.Version++
@@ -366,6 +439,9 @@ func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResu
 	}
 	if isTerminalRunStatus(state.Status) {
 		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotCancellable, state.Status)
+	}
+	if state.Status == RunStatusSuspended {
+		state.PendingRequirement = nil
 	}
 	if err := TransitionRunStatus(&state, RunStatusCancelled); err != nil {
 		return RunResult{State: state}, err
@@ -407,6 +483,15 @@ func (r *Runner) dispatchSteer(ctx context.Context, cmd SteerCommand) (RunResult
 	state, err := r.store.Load(sideEffectCtx(), cmd.RunID)
 	if err != nil {
 		return RunResult{}, err
+	}
+	if state.Status == RunStatusSuspended {
+		return RunResult{State: state}, fmt.Errorf(
+			"%w: command=%s status=%s run_id=%q",
+			ErrResolutionRequired,
+			CommandKindSteer,
+			state.Status,
+			state.ID,
+		)
 	}
 	if isTerminalRunStatus(state.Status) {
 		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotContinuable, state.Status)
@@ -458,6 +543,15 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 	if err != nil {
 		return RunResult{}, err
 	}
+	if state.Status == RunStatusSuspended {
+		return RunResult{State: state}, fmt.Errorf(
+			"%w: command=%s status=%s run_id=%q",
+			ErrResolutionRequired,
+			CommandKindFollowUp,
+			state.Status,
+			state.ID,
+		)
+	}
 	if isTerminalRunStatus(state.Status) {
 		return RunResult{State: state}, fmt.Errorf("%w: %s", ErrRunNotContinuable, state.Status)
 	}
@@ -466,8 +560,9 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 		Content: cmd.UserPrompt,
 	})
 	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
-		MaxSteps: cmd.MaxSteps,
-		Tools:    CloneToolDefinitions(cmd.Tools),
+		MaxSteps:   cmd.MaxSteps,
+		Tools:      CloneToolDefinitions(cmd.Tools),
+		Resolution: nil,
 	})
 	var eventErr error
 	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {
@@ -483,6 +578,14 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 			Step:        finalState.Step,
 			Type:        EventTypeRunCancelled,
 			Description: cancellationEventDescription(runErr),
+		}))
+	}
+	if finalState.Status == RunStatusSuspended {
+		eventErr = errors.Join(eventErr, publishEvent(sideEffectCtx(), r.events, Event{
+			RunID:       cmd.RunID,
+			Step:        finalState.Step,
+			Type:        EventTypeRunSuspended,
+			Description: suspensionEventDescription(finalState),
 		}))
 	}
 	finalState.Version++

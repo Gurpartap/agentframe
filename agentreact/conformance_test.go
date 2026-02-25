@@ -287,7 +287,7 @@ func TestConformance_ContinueDeterministicProgression(t *testing.T) {
 	beforeMessages := agent.CloneMessages(initialResult.State.Messages)
 	continuedResult, continueErr := runner.Continue(context.Background(), initialResult.State.ID, 3, []agent.ToolDefinition{
 		{Name: "lookup"},
-	})
+	}, nil)
 	if continueErr != nil {
 		t.Fatalf("continue returned error: %v", continueErr)
 	}
@@ -357,7 +357,7 @@ func TestConformance_CommandAppliedContinueOrdering(t *testing.T) {
 		t.Fatalf("new runner: %v", err)
 	}
 
-	result, err := runner.Continue(context.Background(), runID, 2, nil)
+	result, err := runner.Continue(context.Background(), runID, 2, nil, nil)
 	if err != nil {
 		t.Fatalf("continue returned error: %v", err)
 	}
@@ -717,5 +717,254 @@ func TestConformance_DeterministicUnderIdenticalScriptedInputs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(secondEvents, firstEvents) {
 		t.Fatalf("event stream mismatch under identical scripted inputs")
+	}
+}
+
+func TestConformance_ReactLoopRejectsSuspendedInputWithoutResolution(t *testing.T) {
+	t.Parallel()
+
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "final",
+		},
+	})
+	loop, err := agentreact.New(model, newRegistry(map[string]handler{}), newEventSink())
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+
+	initial := agent.RunState{
+		ID:     "react-loop-suspended-direct-execute",
+		Status: agent.RunStatusSuspended,
+		PendingRequirement: &agent.PendingRequirement{
+			ID:   "req-1",
+			Kind: agent.RequirementKindApproval,
+		},
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "seed"},
+		},
+	}
+	next, execErr := loop.Execute(context.Background(), initial, agent.EngineInput{MaxSteps: 2})
+	if !errors.Is(execErr, agent.ErrResolutionRequired) {
+		t.Fatalf("expected ErrResolutionRequired, got %v", execErr)
+	}
+	if !reflect.DeepEqual(next, initial) {
+		t.Fatalf("state changed on suspended direct execute rejection")
+	}
+}
+
+func TestConformance_ContinueFromSuspendedWithResolutionUsingReactLoop(t *testing.T) {
+	t.Parallel()
+
+	runID := agent.RunID("conformance-continue-suspended-resolution")
+	store := newRunStore()
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusSuspended,
+		Step:   2,
+		PendingRequirement: &agent.PendingRequirement{
+			ID:   "req-user-input",
+			Kind: agent.RequirementKindUserInput,
+		},
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "seed"},
+		},
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "final after resolution",
+		},
+	})
+	registry := newRegistry(map[string]handler{})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("continue-suspended"),
+		RunStore:    store,
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	loadedBefore, err := store.Load(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("load before continue: %v", err)
+	}
+	prefix := agent.CloneMessages(loadedBefore.Messages)
+
+	result, err := runner.Dispatch(context.Background(), agent.ContinueCommand{
+		RunID:    runID,
+		MaxSteps: 5,
+		Resolution: &agent.Resolution{
+			RequirementID: "req-user-input",
+			Kind:          agent.RequirementKindUserInput,
+			Outcome:       agent.ResolutionOutcomeProvided,
+			Value:         "provided input",
+		},
+	})
+	if err != nil {
+		t.Fatalf("continue returned error: %v", err)
+	}
+	if result.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared after continue")
+	}
+	if len(result.State.Messages) <= len(prefix) {
+		t.Fatalf("expected transcript growth after continue")
+	}
+	if !reflect.DeepEqual(result.State.Messages[:len(prefix)], prefix) {
+		t.Fatalf("continue mutated transcript prefix")
+	}
+
+	loadedAfter, err := store.Load(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("load after continue: %v", err)
+	}
+	if !reflect.DeepEqual(loadedAfter, result.State) {
+		t.Fatalf("saved state mismatch after continue")
+	}
+
+	gotEvents := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	if len(gotEvents) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(gotEvents), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if gotEvents[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, gotEvents[i].Type, wantTypes[i])
+		}
+	}
+	if gotEvents[len(gotEvents)-1].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[len(gotEvents)-1].CommandKind, agent.CommandKindContinue)
+	}
+}
+
+func TestConformance_RunSuspendsWhenModelEmitsRequirement(t *testing.T) {
+	t.Parallel()
+
+	runID := agent.RunID("conformance-run-suspends-on-requirement")
+	events := newEventSink()
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "need approval before tool execution",
+				Requirement: &agent.PendingRequirement{
+					ID:     "req-approval",
+					Kind:   agent.RequirementKindApproval,
+					Prompt: "approve execution",
+				},
+			},
+		},
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "approved and completed",
+			},
+		},
+	)
+	loop, err := agentreact.New(model, newRegistry(map[string]handler{}), events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("suspend-flow"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	runResult, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      runID,
+		UserPrompt: "start",
+		MaxSteps:   4,
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if runResult.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected run status: %s", runResult.State.Status)
+	}
+	if runResult.State.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement on suspended run")
+	}
+	if runResult.State.PendingRequirement.ID != "req-approval" {
+		t.Fatalf("unexpected requirement id: %q", runResult.State.PendingRequirement.ID)
+	}
+	prefix := agent.CloneMessages(runResult.State.Messages)
+
+	continued, continueErr := runner.Continue(
+		context.Background(),
+		runID,
+		4,
+		nil,
+		&agent.Resolution{
+			RequirementID: "req-approval",
+			Kind:          agent.RequirementKindApproval,
+			Outcome:       agent.ResolutionOutcomeApproved,
+		},
+	)
+	if continueErr != nil {
+		t.Fatalf("continue returned error: %v", continueErr)
+	}
+	if continued.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected continued status: %s", continued.State.Status)
+	}
+	if continued.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement should be cleared after continue")
+	}
+	if len(continued.State.Messages) <= len(prefix) {
+		t.Fatalf("expected transcript growth after continue")
+	}
+	if !reflect.DeepEqual(continued.State.Messages[:len(prefix)], prefix) {
+		t.Fatalf("continue mutated transcript prefix")
+	}
+
+	gotEvents := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunSuspended,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	if len(gotEvents) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(gotEvents), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if gotEvents[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, gotEvents[i].Type, wantTypes[i])
+		}
+	}
+	if gotEvents[4].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected start command kind: got=%s want=%s", gotEvents[4].CommandKind, agent.CommandKindStart)
+	}
+	if gotEvents[8].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected continue command kind: got=%s want=%s", gotEvents[8].CommandKind, agent.CommandKindContinue)
 	}
 }

@@ -138,6 +138,7 @@ func ValidateEvent(event Event) error {
 	case EventTypeRunStarted,
 		EventTypeRunCompleted,
 		EventTypeRunFailed,
+		EventTypeRunSuspended,
 		EventTypeRunCancelled,
 		EventTypeRunCheckpoint:
 		if event.CommandKind != "" {
@@ -181,6 +182,7 @@ func isKnownEventType(eventType EventType) bool {
 		EventTypeToolResult,
 		EventTypeRunCompleted,
 		EventTypeRunFailed,
+		EventTypeRunSuspended,
 		EventTypeRunCancelled,
 		EventTypeRunCheckpoint:
 		return true

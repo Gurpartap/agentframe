@@ -137,7 +137,7 @@ func TestPublicRuntimeCompositionSmoke(t *testing.T) {
 		t.Fatalf("continue initial status mismatch: got=%s want=%s", initialContinue.State.Status, agent.RunStatusMaxStepsExceeded)
 	}
 
-	continued, err := runner.Continue(ctx, continueRunID, 2, []agent.ToolDefinition{{Name: toolNameLookup}})
+	continued, err := runner.Continue(ctx, continueRunID, 2, []agent.ToolDefinition{{Name: toolNameLookup}}, nil)
 	if err != nil {
 		t.Fatalf("continue returned error: %v", err)
 	}

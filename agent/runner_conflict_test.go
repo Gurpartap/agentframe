@@ -54,7 +54,7 @@ func TestRunnerMutatingCommands_SaveConflictReturnsNormalizedCommandConflict(t *
 				}
 				runner := newConflictTestRunner(t, store, engine, events)
 
-				result, runErr := runner.Continue(context.Background(), runID, 3, nil)
+				result, runErr := runner.Continue(context.Background(), runID, 3, nil, nil)
 				if !errors.Is(runErr, agent.ErrCommandConflict) {
 					t.Fatalf("expected ErrCommandConflict, got %v", runErr)
 				}

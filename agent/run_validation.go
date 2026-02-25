@@ -37,6 +37,9 @@ func ValidateRunState(state RunState) error {
 			state.ID,
 		)
 	}
+	if err := validateSuspensionInvariant(state); err != nil {
+		return err
+	}
 	return nil
 }
 

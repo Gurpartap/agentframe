@@ -50,7 +50,7 @@ func TestRunnerEngineInputToolDefinitionsRemainImmutable(t *testing.T) {
 				}
 			},
 			call: func(runner *agent.Runner, tools []agent.ToolDefinition) (agent.RunResult, error) {
-				return runner.Continue(context.Background(), "immut-tools-continue", 3, tools)
+				return runner.Continue(context.Background(), "immut-tools-continue", 3, tools, nil)
 			},
 		},
 		{

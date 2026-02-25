@@ -54,9 +54,46 @@ func publishEvent(ctx context.Context, sink agent.EventSink, event agent.Event) 
 	return nil
 }
 
+func cloneResolution(in *agent.Resolution) *agent.Resolution {
+	if in == nil {
+		return nil
+	}
+	resolutionCopy := *in
+	return &resolutionCopy
+}
+
+func resolutionMessage(resolution *agent.Resolution) agent.Message {
+	if resolution == nil {
+		return agent.Message{}
+	}
+	content := fmt.Sprintf(
+		"[resolution] requirement_id=%q kind=%s outcome=%s",
+		resolution.RequirementID,
+		resolution.Kind,
+		resolution.Outcome,
+	)
+	if resolution.Value != "" {
+		content = fmt.Sprintf("%s value=%q", content, resolution.Value)
+	}
+	return agent.Message{
+		Role:    agent.RoleUser,
+		Content: content,
+	}
+}
+
 func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
 	if ctx == nil {
 		return state, agent.ErrContextNil
+	}
+	if err := agent.ValidateRunState(state); err != nil {
+		return state, err
+	}
+	if state.Status == agent.RunStatusSuspended {
+		return state, fmt.Errorf(
+			"%w: run_id=%q reason=continue_requires_resolution",
+			agent.ErrResolutionRequired,
+			state.ID,
+		)
 	}
 
 	maxSteps := input.MaxSteps
@@ -69,6 +106,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 	if err := agent.TransitionRunStatus(&state, agent.RunStatusRunning); err != nil {
 		return state, errors.Join(err, eventErr)
 	}
+	if input.Resolution != nil {
+		state.Messages = append(state.Messages, resolutionMessage(input.Resolution))
+	}
 	for state.Step < maxSteps {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return l.cancelRun(ctx, state, ctxErr, eventErr)
@@ -77,8 +117,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 		state.Step++
 
 		assistant, err := l.model.Generate(ctx, ModelRequest{
-			Messages: agent.CloneMessages(state.Messages),
-			Tools:    agent.CloneToolDefinitions(input.Tools),
+			Messages:   agent.CloneMessages(state.Messages),
+			Tools:      agent.CloneToolDefinitions(input.Tools),
+			Resolution: cloneResolution(input.Resolution),
 		})
 		if err != nil {
 			if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
@@ -96,6 +137,22 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 			Type:    agent.EventTypeAssistantMessage,
 			Message: &assistant,
 		}))
+		if assistant.Requirement != nil {
+			if len(assistant.ToolCalls) > 0 {
+				return l.failRun(
+					ctx,
+					state,
+					fmt.Errorf("assistant response cannot include both requirement and tool calls"),
+					eventErr,
+				)
+			}
+			requirementCopy := *assistant.Requirement
+			state.PendingRequirement = &requirementCopy
+			if err := agent.TransitionRunStatus(&state, agent.RunStatusSuspended); err != nil {
+				return l.failRun(ctx, state, err, eventErr)
+			}
+			return state, eventErr
+		}
 
 		if len(assistant.ToolCalls) == 0 {
 			if err := agent.TransitionRunStatus(&state, agent.RunStatusCompleted); err != nil {

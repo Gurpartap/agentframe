@@ -35,6 +35,19 @@ func TestValidateRunStateMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "valid suspended with pending requirement",
+			state: agent.RunState{
+				ID:      "run-valid-suspended",
+				Version: 2,
+				Step:    3,
+				Status:  agent.RunStatusSuspended,
+				PendingRequirement: &agent.PendingRequirement{
+					ID:   "req-1",
+					Kind: agent.RequirementKindApproval,
+				},
+			},
+		},
+		{
 			name: "empty id",
 			state: agent.RunState{
 				ID:      "",
@@ -82,6 +95,30 @@ func TestValidateRunStateMatrix(t *testing.T) {
 				Version: 0,
 				Step:    0,
 				Status:  agent.RunStatus("mystery"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "suspended missing pending requirement",
+			state: agent.RunState{
+				ID:      "run-suspended-missing-requirement",
+				Version: 0,
+				Step:    0,
+				Status:  agent.RunStatusSuspended,
+			},
+			wantErr: true,
+		},
+		{
+			name: "running with pending requirement",
+			state: agent.RunState{
+				ID:      "run-running-with-requirement",
+				Version: 0,
+				Step:    0,
+				Status:  agent.RunStatusRunning,
+				PendingRequirement: &agent.PendingRequirement{
+					ID:   "req-1",
+					Kind: agent.RequirementKindApproval,
+				},
 			},
 			wantErr: true,
 		},

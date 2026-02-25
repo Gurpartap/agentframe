@@ -8,8 +8,9 @@ import (
 
 // ModelRequest is the model input contract for the ReAct engine.
 type ModelRequest struct {
-	Messages []agent.Message
-	Tools    []agent.ToolDefinition
+	Messages   []agent.Message
+	Tools      []agent.ToolDefinition
+	Resolution *agent.Resolution
 }
 
 // Model produces assistant messages that may include tool calls.
