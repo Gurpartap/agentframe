@@ -59,6 +59,25 @@ func TestRegistryExecute_NormalizesResult(t *testing.T) {
 	}
 }
 
+func TestRegistryExecute_NilHandlerFromInitialMapReturnsError(t *testing.T) {
+	t.Parallel()
+
+	registry := toolingregistry.New(map[string]toolingregistry.Handler{
+		"lookup": nil,
+	})
+
+	result, err := registry.Execute(context.Background(), agent.ToolCall{ID: "call-2", Name: "lookup"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), `tool "lookup" has nil handler`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != (agent.ToolResult{}) {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
 func TestRegistryRegister_AddsHandler(t *testing.T) {
 	t.Parallel()
 
@@ -73,6 +92,24 @@ func TestRegistryRegister_AddsHandler(t *testing.T) {
 	}
 	if result.Content != "pong" {
 		t.Fatalf("unexpected content: %q", result.Content)
+	}
+}
+
+func TestRegistryExecute_NilHandlerFromRegisterReturnsError(t *testing.T) {
+	t.Parallel()
+
+	registry := toolingregistry.New(nil)
+	registry.Register("lookup", nil)
+
+	result, err := registry.Execute(context.Background(), agent.ToolCall{ID: "call-8", Name: "lookup"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), `tool "lookup" has nil handler`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != (agent.ToolResult{}) {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 }
 

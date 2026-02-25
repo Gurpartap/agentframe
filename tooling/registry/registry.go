@@ -38,6 +38,9 @@ func (r *Registry) Execute(ctx context.Context, call agent.ToolCall) (agent.Tool
 	if !ok {
 		return agent.ToolResult{}, fmt.Errorf("tool %q is not registered", call.Name)
 	}
+	if handler == nil {
+		return agent.ToolResult{}, fmt.Errorf("tool %q has nil handler", call.Name)
+	}
 
 	content, err := handler(ctx, call.Arguments)
 	if err != nil {
