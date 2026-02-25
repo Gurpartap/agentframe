@@ -43,6 +43,22 @@ func NewRunner(deps Dependencies) (*Runner, error) {
 	}, nil
 }
 
+func publishEvent(ctx context.Context, sink EventSink, event Event) error {
+	if err := sink.Publish(ctx, event); err != nil {
+		return errors.Join(
+			ErrEventPublish,
+			fmt.Errorf(
+				"type=%s run_id=%s step=%d: %w",
+				event.Type,
+				event.RunID,
+				event.Step,
+				err,
+			),
+		)
+	}
+	return nil
+}
+
 // Dispatch executes a typed command against the run store.
 func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
 	switch command := cmd.(type) {
@@ -132,12 +148,13 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 		return RunResult{}, err
 	}
 	state.Version++
-	_ = r.events.Publish(ctx, Event{
+	var eventErr error
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       runID,
 		Step:        0,
 		Type:        EventTypeRunStarted,
 		Description: "run persisted and ready for execution",
-	})
+	}))
 
 	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
 		MaxSteps: input.MaxSteps,
@@ -145,26 +162,23 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 	})
 
 	if saveErr := r.store.Save(ctx, finalState); saveErr != nil {
-		if runErr != nil {
-			return RunResult{}, errors.Join(runErr, saveErr)
-		}
-		return RunResult{}, saveErr
+		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
 	finalState.Version++
-	_ = r.events.Publish(ctx, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
 		Type:        EventTypeRunCheckpoint,
 		Description: "final state persisted",
-	})
-	_ = r.events.Publish(ctx, Event{
+	}))
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
 		Type:        EventTypeCommandApplied,
 		CommandKind: CommandKindStart,
 		Description: "start command applied",
-	})
-	return RunResult{State: finalState}, runErr
+	}))
+	return RunResult{State: finalState}, errors.Join(runErr, eventErr)
 }
 
 // Continue loads an existing run and executes additional engine steps.
@@ -189,27 +203,25 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 		MaxSteps: cmd.MaxSteps,
 		Tools:    cmd.Tools,
 	})
+	var eventErr error
 	if saveErr := r.store.Save(ctx, finalState); saveErr != nil {
-		if runErr != nil {
-			return RunResult{}, errors.Join(runErr, saveErr)
-		}
-		return RunResult{}, saveErr
+		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
 	finalState.Version++
-	_ = r.events.Publish(ctx, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
 		Type:        EventTypeRunCheckpoint,
 		Description: "continued run state persisted",
-	})
-	_ = r.events.Publish(ctx, Event{
+	}))
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       runID,
 		Step:        finalState.Step,
 		Type:        EventTypeCommandApplied,
 		CommandKind: CommandKindContinue,
 		Description: "continue command applied",
-	})
-	return RunResult{State: finalState}, runErr
+	}))
+	return RunResult{State: finalState}, errors.Join(runErr, eventErr)
 }
 
 // Cancel marks a non-terminal run as cancelled and persists the cancellation state.
@@ -233,20 +245,21 @@ func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResu
 		return RunResult{}, err
 	}
 	state.Version++
-	_ = r.events.Publish(ctx, Event{
+	var eventErr error
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       runID,
 		Step:        state.Step,
 		Type:        EventTypeRunCancelled,
 		Description: "run cancelled",
-	})
-	_ = r.events.Publish(ctx, Event{
+	}))
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       runID,
 		Step:        state.Step,
 		Type:        EventTypeCommandApplied,
 		CommandKind: CommandKindCancel,
 		Description: "cancel command applied",
-	})
-	return RunResult{State: state}, nil
+	}))
+	return RunResult{State: state}, eventErr
 }
 
 // Steer appends a user instruction to a non-terminal run without engine execution.
@@ -273,20 +286,21 @@ func (r *Runner) dispatchSteer(ctx context.Context, cmd SteerCommand) (RunResult
 		return RunResult{}, err
 	}
 	state.Version++
-	_ = r.events.Publish(ctx, Event{
+	var eventErr error
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       cmd.RunID,
 		Step:        state.Step,
 		Type:        EventTypeRunCheckpoint,
 		Description: "steered run state persisted",
-	})
-	_ = r.events.Publish(ctx, Event{
+	}))
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       cmd.RunID,
 		Step:        state.Step,
 		Type:        EventTypeCommandApplied,
 		CommandKind: CommandKindSteer,
 		Description: "steer command applied",
-	})
-	return RunResult{State: state}, nil
+	}))
+	return RunResult{State: state}, eventErr
 }
 
 // FollowUp appends a user prompt to a non-terminal run and executes the engine.
@@ -315,25 +329,23 @@ func (r *Runner) dispatchFollowUp(ctx context.Context, cmd FollowUpCommand) (Run
 		MaxSteps: cmd.MaxSteps,
 		Tools:    cmd.Tools,
 	})
+	var eventErr error
 	if saveErr := r.store.Save(ctx, finalState); saveErr != nil {
-		if runErr != nil {
-			return RunResult{}, errors.Join(runErr, saveErr)
-		}
-		return RunResult{}, saveErr
+		return RunResult{}, errors.Join(runErr, saveErr, eventErr)
 	}
 	finalState.Version++
-	_ = r.events.Publish(ctx, Event{
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       cmd.RunID,
 		Step:        finalState.Step,
 		Type:        EventTypeRunCheckpoint,
 		Description: "follow-up run state persisted",
-	})
-	_ = r.events.Publish(ctx, Event{
+	}))
+	eventErr = errors.Join(eventErr, publishEvent(ctx, r.events, Event{
 		RunID:       cmd.RunID,
 		Step:        finalState.Step,
 		Type:        EventTypeCommandApplied,
 		CommandKind: CommandKindFollowUp,
 		Description: "follow-up command applied",
-	})
-	return RunResult{State: finalState}, runErr
+	}))
+	return RunResult{State: finalState}, errors.Join(runErr, eventErr)
 }

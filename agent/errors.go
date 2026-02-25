@@ -21,4 +21,6 @@ var (
 	ErrCommandInvalid = errors.New("command is invalid")
 	// ErrCommandUnsupported is returned when command kind has no runtime handler.
 	ErrCommandUnsupported = errors.New("command is unsupported")
+	// ErrEventPublish is returned when runtime event emission fails.
+	ErrEventPublish = errors.New("event publish failed")
 )
