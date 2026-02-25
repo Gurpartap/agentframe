@@ -9,6 +9,7 @@ const (
 	EventTypeToolResult       EventType = "tool_result"
 	EventTypeRunCompleted     EventType = "run_completed"
 	EventTypeRunFailed        EventType = "run_failed"
+	EventTypeRunCancelled     EventType = "run_cancelled"
 	EventTypeRunCheckpoint    EventType = "run_checkpoint"
 )
 

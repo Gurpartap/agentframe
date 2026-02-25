@@ -9,6 +9,8 @@ type RunStatus string
 const (
 	RunStatusPending          RunStatus = "pending"
 	RunStatusRunning          RunStatus = "running"
+	RunStatusSuspended        RunStatus = "suspended"
+	RunStatusCancelled        RunStatus = "cancelled"
 	RunStatusCompleted        RunStatus = "completed"
 	RunStatusFailed           RunStatus = "failed"
 	RunStatusMaxStepsExceeded RunStatus = "max_steps_exceeded"

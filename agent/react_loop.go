@@ -46,7 +46,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 		maxSteps = DefaultMaxSteps
 	}
 
-	state.Status = RunStatusRunning
+	if err := transitionRunStatus(&state, RunStatusRunning); err != nil {
+		return state, err
+	}
 	for state.Step < maxSteps {
 		state.Step++
 
@@ -55,7 +57,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 			Tools:    cloneToolDefinitions(cfg.Tools),
 		})
 		if err != nil {
-			state.Status = RunStatusFailed
+			if transitionErr := transitionRunStatus(&state, RunStatusFailed); transitionErr != nil {
+				return state, errors.Join(err, transitionErr)
+			}
 			state.Error = err.Error()
 			_ = l.events.Publish(ctx, Event{
 				RunID:       state.ID,
@@ -77,7 +81,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 		})
 
 		if len(assistant.ToolCalls) == 0 {
-			state.Status = RunStatusCompleted
+			if err := transitionRunStatus(&state, RunStatusCompleted); err != nil {
+				return state, err
+			}
 			state.Output = assistant.Content
 			_ = l.events.Publish(ctx, Event{
 				RunID:       state.ID,
@@ -116,7 +122,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state RunState, cfg ReactConfig
 		}
 	}
 
-	state.Status = RunStatusMaxStepsExceeded
+	if err := transitionRunStatus(&state, RunStatusMaxStepsExceeded); err != nil {
+		return state, errors.Join(ErrMaxStepsExceeded, err)
+	}
 	state.Error = ErrMaxStepsExceeded.Error()
 	_ = l.events.Publish(ctx, Event{
 		RunID:       state.ID,
