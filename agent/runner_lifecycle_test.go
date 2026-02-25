@@ -72,7 +72,7 @@ func TestRunnerCancel_NonTerminalStates(t *testing.T) {
 			}
 
 			gotEvents := events.Events()
-			if len(gotEvents) != 1 {
+			if len(gotEvents) != 2 {
 				t.Fatalf("unexpected event count: %d", len(gotEvents))
 			}
 			if gotEvents[0].Type != agent.EventTypeRunCancelled {
@@ -83,6 +83,12 @@ func TestRunnerCancel_NonTerminalStates(t *testing.T) {
 			}
 			if gotEvents[0].Step != initial.Step {
 				t.Fatalf("unexpected event step: %d", gotEvents[0].Step)
+			}
+			if gotEvents[1].Type != agent.EventTypeCommandApplied {
+				t.Fatalf("unexpected second event type: %s", gotEvents[1].Type)
+			}
+			if gotEvents[1].CommandKind != agent.CommandKindCancel {
+				t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[1].CommandKind, agent.CommandKindCancel)
 			}
 		})
 	}
@@ -234,7 +240,7 @@ func TestRunnerRun_PreCancelledContext(t *testing.T) {
 	}
 
 	gotEvents := events.Events()
-	if len(gotEvents) != 3 {
+	if len(gotEvents) != 4 {
 		t.Fatalf("unexpected event count: %d", len(gotEvents))
 	}
 	if gotEvents[0].Type != agent.EventTypeRunStarted {
@@ -245,6 +251,12 @@ func TestRunnerRun_PreCancelledContext(t *testing.T) {
 	}
 	if gotEvents[2].Type != agent.EventTypeRunCheckpoint {
 		t.Fatalf("unexpected third event type: %s", gotEvents[2].Type)
+	}
+	if gotEvents[3].Type != agent.EventTypeCommandApplied {
+		t.Fatalf("unexpected fourth event type: %s", gotEvents[3].Type)
+	}
+	if gotEvents[3].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[3].CommandKind, agent.CommandKindStart)
 	}
 	if gotEvents[1].Description != context.Canceled.Error() {
 		t.Fatalf("unexpected cancelled event description: %q", gotEvents[1].Description)
@@ -299,7 +311,7 @@ func TestRunnerContinue_CancelledContext(t *testing.T) {
 	}
 
 	gotEvents := events.Events()
-	if len(gotEvents) != 2 {
+	if len(gotEvents) != 3 {
 		t.Fatalf("unexpected event count: %d", len(gotEvents))
 	}
 	if gotEvents[0].Type != agent.EventTypeRunCancelled {
@@ -307,6 +319,12 @@ func TestRunnerContinue_CancelledContext(t *testing.T) {
 	}
 	if gotEvents[1].Type != agent.EventTypeRunCheckpoint {
 		t.Fatalf("unexpected second event type: %s", gotEvents[1].Type)
+	}
+	if gotEvents[2].Type != agent.EventTypeCommandApplied {
+		t.Fatalf("unexpected third event type: %s", gotEvents[2].Type)
+	}
+	if gotEvents[2].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected command kind: got=%s want=%s", gotEvents[2].CommandKind, agent.CommandKindContinue)
 	}
 }
 

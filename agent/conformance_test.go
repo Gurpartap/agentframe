@@ -78,8 +78,9 @@ func TestConformance_EventOrdering(t *testing.T) {
 		agent.EventTypeAssistantMessage,
 		agent.EventTypeRunCompleted,
 		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
 	}
-	wantSteps := []int{0, 1, 1, 2, 2, 2}
+	wantSteps := []int{0, 1, 1, 2, 2, 2, 2}
 	if len(got) != len(wantTypes) {
 		t.Fatalf("unexpected event count: got=%d want=%d", len(got), len(wantTypes))
 	}
@@ -99,6 +100,9 @@ func TestConformance_EventOrdering(t *testing.T) {
 	}
 	if got[2].ToolResult == nil || got[2].ToolResult.CallID != "call-1" || got[2].ToolResult.Name != "lookup" {
 		t.Fatalf("tool result event does not link to expected tool call")
+	}
+	if got[6].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected command kind: got=%s want=%s", got[6].CommandKind, agent.CommandKindStart)
 	}
 }
 
@@ -312,5 +316,141 @@ func TestConformance_ContinueDeterministicProgression(t *testing.T) {
 	}
 	if !reflect.DeepEqual(loadedAfterContinue, continuedResult.State) {
 		t.Fatalf("saved state mismatch after continue")
+	}
+}
+
+func TestConformance_CommandAppliedContinueOrdering(t *testing.T) {
+	t.Parallel()
+
+	runID := agent.RunID("conformance-continue-command")
+	store := testkit.NewRunStore()
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusPending,
+		Messages: []agent.Message{
+			{Role: agent.RoleUser, Content: "continue me"},
+		},
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+
+	events := testkit.NewEventSink()
+	model := testkit.NewScriptedModel(testkit.Response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "continued",
+		},
+	})
+	registry := testkit.NewRegistry(map[string]testkit.Handler{})
+	loop, err := agent.NewReactLoop(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: testkit.NewCounterIDGenerator("continue-order"),
+		RunStore:    store,
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, err := runner.Continue(context.Background(), runID, 2, nil)
+	if err != nil {
+		t.Fatalf("continue returned error: %v", err)
+	}
+	if result.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+
+	got := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	wantSteps := []int{1, 1, 1, 1}
+	if len(got) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(got), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if got[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, got[i].Type, wantTypes[i])
+		}
+		if got[i].Step != wantSteps[i] {
+			t.Fatalf("event[%d] step mismatch: got=%d want=%d", i, got[i].Step, wantSteps[i])
+		}
+	}
+	if got[3].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected command kind: got=%s want=%s", got[3].CommandKind, agent.CommandKindContinue)
+	}
+}
+
+func TestConformance_CommandAppliedCancelOrdering(t *testing.T) {
+	t.Parallel()
+
+	runID := agent.RunID("conformance-cancel-command")
+	store := testkit.NewRunStore()
+	initial := agent.RunState{
+		ID:     runID,
+		Status: agent.RunStatusRunning,
+		Step:   3,
+	}
+	if err := store.Save(context.Background(), initial); err != nil {
+		t.Fatalf("save initial state: %v", err)
+	}
+
+	events := testkit.NewEventSink()
+	model := testkit.NewScriptedModel(testkit.Response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "unused",
+		},
+	})
+	registry := testkit.NewRegistry(map[string]testkit.Handler{})
+	loop, err := agent.NewReactLoop(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: testkit.NewCounterIDGenerator("cancel-order"),
+		RunStore:    store,
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, err := runner.Cancel(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("cancel returned error: %v", err)
+	}
+	if result.State.Status != agent.RunStatusCancelled {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+
+	got := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunCancelled,
+		agent.EventTypeCommandApplied,
+	}
+	wantSteps := []int{3, 3}
+	if len(got) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(got), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if got[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, got[i].Type, wantTypes[i])
+		}
+		if got[i].Step != wantSteps[i] {
+			t.Fatalf("event[%d] step mismatch: got=%d want=%d", i, got[i].Step, wantSteps[i])
+		}
+	}
+	if got[1].CommandKind != agent.CommandKindCancel {
+		t.Fatalf("unexpected command kind: got=%s want=%s", got[1].CommandKind, agent.CommandKindCancel)
 	}
 }

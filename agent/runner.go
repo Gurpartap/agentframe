@@ -143,6 +143,13 @@ func (r *Runner) dispatchStart(ctx context.Context, cmd StartCommand) (RunResult
 		Type:        EventTypeRunCheckpoint,
 		Description: "final state persisted",
 	})
+	_ = r.events.Publish(ctx, Event{
+		RunID:       runID,
+		Step:        finalState.Step,
+		Type:        EventTypeCommandApplied,
+		CommandKind: CommandKindStart,
+		Description: "start command applied",
+	})
 	return RunResult{State: finalState}, runErr
 }
 
@@ -181,6 +188,13 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 		Type:        EventTypeRunCheckpoint,
 		Description: "continued run state persisted",
 	})
+	_ = r.events.Publish(ctx, Event{
+		RunID:       runID,
+		Step:        finalState.Step,
+		Type:        EventTypeCommandApplied,
+		CommandKind: CommandKindContinue,
+		Description: "continue command applied",
+	})
 	return RunResult{State: finalState}, runErr
 }
 
@@ -210,6 +224,13 @@ func (r *Runner) dispatchCancel(ctx context.Context, cmd CancelCommand) (RunResu
 		Step:        state.Step,
 		Type:        EventTypeRunCancelled,
 		Description: "run cancelled",
+	})
+	_ = r.events.Publish(ctx, Event{
+		RunID:       runID,
+		Step:        state.Step,
+		Type:        EventTypeCommandApplied,
+		CommandKind: CommandKindCancel,
+		Description: "cancel command applied",
 	})
 	return RunResult{State: state}, nil
 }

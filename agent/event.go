@@ -4,6 +4,7 @@ package agent
 type EventType string
 
 const (
+	EventTypeCommandApplied   EventType = "command_applied"
 	EventTypeRunStarted       EventType = "run_started"
 	EventTypeAssistantMessage EventType = "assistant_message"
 	EventTypeToolResult       EventType = "tool_result"
@@ -18,6 +19,7 @@ type Event struct {
 	RunID       RunID       `json:"run_id"`
 	Step        int         `json:"step"`
 	Type        EventType   `json:"type"`
+	CommandKind CommandKind `json:"command_kind,omitempty"`
 	Message     *Message    `json:"message,omitempty"`
 	ToolResult  *ToolResult `json:"tool_result,omitempty"`
 	Description string      `json:"description,omitempty"`
