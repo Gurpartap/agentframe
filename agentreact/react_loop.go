@@ -58,9 +58,6 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 	if ctx == nil {
 		return state, agent.ErrContextNil
 	}
-	if err := validateToolDefinitions(input.Tools); err != nil {
-		return state, err
-	}
 
 	maxSteps := input.MaxSteps
 	if maxSteps <= 0 {
@@ -236,26 +233,6 @@ func validateToolCallShape(calls []agent.ToolCall) error {
 			)
 		}
 		seen[call.ID] = i
-	}
-	return nil
-}
-
-func validateToolDefinitions(definitions []agent.ToolDefinition) error {
-	seen := make(map[string]int, len(definitions))
-	for i, definition := range definitions {
-		if definition.Name == "" {
-			return fmt.Errorf("%w: index=%d reason=empty_name", agent.ErrToolDefinitionsInvalid, i)
-		}
-		if firstIndex, exists := seen[definition.Name]; exists {
-			return fmt.Errorf(
-				"%w: index=%d name=%q reason=duplicate_name first_index=%d",
-				agent.ErrToolDefinitionsInvalid,
-				i,
-				definition.Name,
-				firstIndex,
-			)
-		}
-		seen[definition.Name] = i
 	}
 	return nil
 }
