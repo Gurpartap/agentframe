@@ -55,7 +55,11 @@ type handler = toolingregistry.Handler
 type registry = toolingregistry.Registry
 
 func newRegistry(initial map[string]handler) *registry {
-	return toolingregistry.New(initial)
+	registry, err := toolingregistry.New(initial)
+	if err != nil {
+		panic(err)
+	}
+	return registry
 }
 
 type runStore = runstoreinmem.Store

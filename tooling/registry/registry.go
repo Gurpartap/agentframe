@@ -24,18 +24,35 @@ type Registry struct {
 	handlers map[string]Handler
 }
 
-func New(initial map[string]Handler) *Registry {
+func New(initial map[string]Handler) (*Registry, error) {
 	handlers := make(map[string]Handler, len(initial))
 	for name, handler := range initial {
+		if err := validateRegistration(name, handler); err != nil {
+			return nil, err
+		}
 		handlers[name] = handler
 	}
-	return &Registry{handlers: handlers}
+	return &Registry{handlers: handlers}, nil
 }
 
-func (r *Registry) Register(name string, handler Handler) {
+func (r *Registry) Register(name string, handler Handler) error {
+	if err := validateRegistration(name, handler); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.handlers[name] = handler
+	return nil
+}
+
+func validateRegistration(name string, handler Handler) error {
+	if name == "" {
+		return ErrToolNameEmpty
+	}
+	if handler == nil {
+		return ErrNilHandler
+	}
+	return nil
 }
 
 func (r *Registry) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {

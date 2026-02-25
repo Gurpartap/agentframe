@@ -68,11 +68,14 @@ func TestPublicRuntimeCompositionSmoke(t *testing.T) {
 		},
 	)
 
-	tools := toolingregistry.New(map[string]toolingregistry.Handler{
+	tools, err := toolingregistry.New(map[string]toolingregistry.Handler{
 		toolNameLookup: func(_ context.Context, _ map[string]any) (string, error) {
 			return "tool-result", nil
 		},
 	})
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
 	events := eventinginmem.New()
 	store := runstoreinmem.New()
 	loop, err := agentreact.New(model, tools, events)
