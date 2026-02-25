@@ -18,7 +18,10 @@ func TestRegistryExecute_UnknownToolReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), `tool "missing" is not registered`) {
+	if !errors.Is(err, toolingregistry.ErrToolUnregistered) {
+		t.Fatalf("expected ErrToolUnregistered, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"missing"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result != (agent.ToolResult{}) {
@@ -70,7 +73,10 @@ func TestRegistryExecute_NilHandlerFromInitialMapReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), `tool "lookup" has nil handler`) {
+	if !errors.Is(err, toolingregistry.ErrNilHandler) {
+		t.Fatalf("expected ErrNilHandler, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"lookup"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result != (agent.ToolResult{}) {
@@ -105,7 +111,10 @@ func TestRegistryExecute_NilHandlerFromRegisterReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), `tool "lookup" has nil handler`) {
+	if !errors.Is(err, toolingregistry.ErrNilHandler) {
+		t.Fatalf("expected ErrNilHandler, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"lookup"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result != (agent.ToolResult{}) {

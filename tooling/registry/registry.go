@@ -2,10 +2,16 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"agentruntime/agent"
+)
+
+var (
+	ErrToolUnregistered = errors.New("tool is not registered")
+	ErrNilHandler       = errors.New("tool handler is nil")
 )
 
 // Handler executes one tool call using parsed arguments.
@@ -36,10 +42,10 @@ func (r *Registry) Execute(ctx context.Context, call agent.ToolCall) (agent.Tool
 	handler, ok := r.handlers[call.Name]
 	r.mu.RUnlock()
 	if !ok {
-		return agent.ToolResult{}, fmt.Errorf("tool %q is not registered", call.Name)
+		return agent.ToolResult{}, fmt.Errorf("%w: %q", ErrToolUnregistered, call.Name)
 	}
 	if handler == nil {
-		return agent.ToolResult{}, fmt.Errorf("tool %q has nil handler", call.Name)
+		return agent.ToolResult{}, fmt.Errorf("%w: %q", ErrNilHandler, call.Name)
 	}
 
 	content, err := handler(ctx, call.Arguments)
