@@ -45,6 +45,9 @@ func NewRunner(deps Dependencies) (*Runner, error) {
 }
 
 func publishEvent(ctx context.Context, sink EventSink, event Event) error {
+	if err := ValidateEvent(event); err != nil {
+		return err
+	}
 	if err := sink.Publish(ctx, event); err != nil {
 		return errors.Join(
 			ErrEventPublish,

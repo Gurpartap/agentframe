@@ -27,6 +27,8 @@ var (
 	ErrInvalidRunID = errors.New("invalid run id")
 	// ErrEventPublish is returned when runtime event emission fails.
 	ErrEventPublish = errors.New("event publish failed")
+	// ErrEventInvalid is returned when an event payload violates required runtime contracts.
+	ErrEventInvalid = errors.New("event is invalid")
 	// ErrEngineOutputContractViolation is returned when engine output violates runtime state invariants.
 	ErrEngineOutputContractViolation = errors.New("engine output contract violation")
 	// ErrToolDefinitionsInvalid is returned when command tool definitions violate runtime input constraints.

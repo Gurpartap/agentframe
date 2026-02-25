@@ -36,6 +36,9 @@ func New(model Model, tools ToolExecutor, events agent.EventSink) (*ReactLoop, e
 }
 
 func publishEvent(ctx context.Context, sink agent.EventSink, event agent.Event) error {
+	if err := agent.ValidateEvent(event); err != nil {
+		return err
+	}
 	if err := sink.Publish(ctx, event); err != nil {
 		return errors.Join(
 			agent.ErrEventPublish,
