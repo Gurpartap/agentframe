@@ -21,10 +21,10 @@ type ReactLoop struct {
 
 func New(model Model, tools ToolExecutor, events agent.EventSink) (*ReactLoop, error) {
 	if model == nil {
-		return nil, errors.New("model is required")
+		return nil, fmt.Errorf("new react loop: %w", ErrMissingModel)
 	}
 	if tools == nil {
-		return nil, errors.New("tool executor is required")
+		return nil, fmt.Errorf("new react loop: %w", ErrMissingToolExecutor)
 	}
 	if events == nil {
 		events = noopEventSink{}
