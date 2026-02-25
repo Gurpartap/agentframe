@@ -82,6 +82,15 @@ func TestValidateEventMatrix(t *testing.T) {
 			wantErr: "event is invalid: field=step reason=negative value=-1 type=run_started run_id=\"run-1\"",
 		},
 		{
+			name: "unknown event type",
+			event: Event{
+				RunID: "run-1",
+				Step:  0,
+				Type:  EventType("mystery"),
+			},
+			wantErr: "event is invalid: field=type reason=unknown value=\"mystery\" run_id=\"run-1\" step=0",
+		},
+		{
 			name: "command applied missing command kind",
 			event: Event{
 				RunID: "run-1",
@@ -89,6 +98,34 @@ func TestValidateEventMatrix(t *testing.T) {
 				Type:  EventTypeCommandApplied,
 			},
 			wantErr: "event is invalid: field=command_kind reason=empty type=command_applied run_id=\"run-1\" step=0",
+		},
+		{
+			name: "command applied forbids message",
+			event: Event{
+				RunID: "run-1",
+				Step:  0,
+				Type:  EventTypeCommandApplied,
+				Message: &Message{
+					Role:    RoleAssistant,
+					Content: "unexpected",
+				},
+				CommandKind: CommandKindStart,
+			},
+			wantErr: "event is invalid: field=message reason=forbidden type=command_applied run_id=\"run-1\" step=0",
+		},
+		{
+			name: "command applied forbids tool result",
+			event: Event{
+				RunID:       "run-1",
+				Step:        0,
+				Type:        EventTypeCommandApplied,
+				CommandKind: CommandKindStart,
+				ToolResult: &ToolResult{
+					CallID: "call-1",
+					Name:   "lookup",
+				},
+			},
+			wantErr: "event is invalid: field=tool_result reason=forbidden type=command_applied run_id=\"run-1\" step=0",
 		},
 		{
 			name: "assistant message missing payload",
@@ -100,6 +137,37 @@ func TestValidateEventMatrix(t *testing.T) {
 			wantErr: "event is invalid: field=message reason=nil type=assistant_message run_id=\"run-1\" step=1",
 		},
 		{
+			name: "assistant message forbids command kind",
+			event: Event{
+				RunID:       "run-1",
+				Step:        1,
+				Type:        EventTypeAssistantMessage,
+				CommandKind: CommandKindContinue,
+				Message: &Message{
+					Role:    RoleAssistant,
+					Content: "hello",
+				},
+			},
+			wantErr: "event is invalid: field=command_kind reason=forbidden value=\"continue\" type=assistant_message run_id=\"run-1\" step=1",
+		},
+		{
+			name: "assistant message forbids tool result",
+			event: Event{
+				RunID: "run-1",
+				Step:  1,
+				Type:  EventTypeAssistantMessage,
+				Message: &Message{
+					Role:    RoleAssistant,
+					Content: "hello",
+				},
+				ToolResult: &ToolResult{
+					CallID: "call-1",
+					Name:   "lookup",
+				},
+			},
+			wantErr: "event is invalid: field=tool_result reason=forbidden type=assistant_message run_id=\"run-1\" step=1",
+		},
+		{
 			name: "tool result missing payload",
 			event: Event{
 				RunID: "run-1",
@@ -107,6 +175,37 @@ func TestValidateEventMatrix(t *testing.T) {
 				Type:  EventTypeToolResult,
 			},
 			wantErr: "event is invalid: field=tool_result reason=nil type=tool_result run_id=\"run-1\" step=1",
+		},
+		{
+			name: "tool result forbids command kind",
+			event: Event{
+				RunID:       "run-1",
+				Step:        1,
+				Type:        EventTypeToolResult,
+				CommandKind: CommandKindFollowUp,
+				ToolResult: &ToolResult{
+					CallID: "call-1",
+					Name:   "lookup",
+				},
+			},
+			wantErr: "event is invalid: field=command_kind reason=forbidden value=\"follow_up\" type=tool_result run_id=\"run-1\" step=1",
+		},
+		{
+			name: "tool result forbids message",
+			event: Event{
+				RunID: "run-1",
+				Step:  1,
+				Type:  EventTypeToolResult,
+				Message: &Message{
+					Role:    RoleAssistant,
+					Content: "unexpected",
+				},
+				ToolResult: &ToolResult{
+					CallID: "call-1",
+					Name:   "lookup",
+				},
+			},
+			wantErr: "event is invalid: field=message reason=forbidden type=tool_result run_id=\"run-1\" step=1",
 		},
 		{
 			name: "tool result missing call id",
@@ -133,6 +232,42 @@ func TestValidateEventMatrix(t *testing.T) {
 				},
 			},
 			wantErr: "event is invalid: field=tool_result.name reason=empty type=tool_result run_id=\"run-1\" step=1",
+		},
+		{
+			name: "run started forbids command kind",
+			event: Event{
+				RunID:       "run-1",
+				Step:        0,
+				Type:        EventTypeRunStarted,
+				CommandKind: CommandKindStart,
+			},
+			wantErr: "event is invalid: field=command_kind reason=forbidden value=\"start\" type=run_started run_id=\"run-1\" step=0",
+		},
+		{
+			name: "run completed forbids message",
+			event: Event{
+				RunID: "run-1",
+				Step:  2,
+				Type:  EventTypeRunCompleted,
+				Message: &Message{
+					Role:    RoleAssistant,
+					Content: "unexpected",
+				},
+			},
+			wantErr: "event is invalid: field=message reason=forbidden type=run_completed run_id=\"run-1\" step=2",
+		},
+		{
+			name: "run checkpoint forbids tool result",
+			event: Event{
+				RunID: "run-1",
+				Step:  3,
+				Type:  EventTypeRunCheckpoint,
+				ToolResult: &ToolResult{
+					CallID: "call-1",
+					Name:   "lookup",
+				},
+			},
+			wantErr: "event is invalid: field=tool_result reason=forbidden type=run_checkpoint run_id=\"run-1\" step=3",
 		},
 	}
 

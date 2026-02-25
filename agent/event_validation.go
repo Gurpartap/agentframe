@@ -20,11 +20,39 @@ func ValidateEvent(event Event) error {
 		)
 	}
 
+	if !isKnownEventType(event.Type) {
+		return fmt.Errorf(
+			"%w: field=type reason=unknown value=%q run_id=%q step=%d",
+			ErrEventInvalid,
+			event.Type,
+			event.RunID,
+			event.Step,
+		)
+	}
+
 	switch event.Type {
 	case EventTypeCommandApplied:
 		if event.CommandKind == "" {
 			return fmt.Errorf(
 				"%w: field=command_kind reason=empty type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
+		if event.Message != nil {
+			return fmt.Errorf(
+				"%w: field=message reason=forbidden type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
+		if event.ToolResult != nil {
+			return fmt.Errorf(
+				"%w: field=tool_result reason=forbidden type=%s run_id=%q step=%d",
 				ErrEventInvalid,
 				event.Type,
 				event.RunID,
@@ -41,7 +69,45 @@ func ValidateEvent(event Event) error {
 				event.Step,
 			)
 		}
+		if event.CommandKind != "" {
+			return fmt.Errorf(
+				"%w: field=command_kind reason=forbidden value=%q type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.CommandKind,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
+		if event.ToolResult != nil {
+			return fmt.Errorf(
+				"%w: field=tool_result reason=forbidden type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
 	case EventTypeToolResult:
+		if event.CommandKind != "" {
+			return fmt.Errorf(
+				"%w: field=command_kind reason=forbidden value=%q type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.CommandKind,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
+		if event.Message != nil {
+			return fmt.Errorf(
+				"%w: field=message reason=forbidden type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
 		if event.ToolResult == nil {
 			return fmt.Errorf(
 				"%w: field=tool_result reason=nil type=%s run_id=%q step=%d",
@@ -69,7 +135,56 @@ func ValidateEvent(event Event) error {
 				event.Step,
 			)
 		}
+	case EventTypeRunStarted,
+		EventTypeRunCompleted,
+		EventTypeRunFailed,
+		EventTypeRunCancelled,
+		EventTypeRunCheckpoint:
+		if event.CommandKind != "" {
+			return fmt.Errorf(
+				"%w: field=command_kind reason=forbidden value=%q type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.CommandKind,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
+		if event.Message != nil {
+			return fmt.Errorf(
+				"%w: field=message reason=forbidden type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
+		if event.ToolResult != nil {
+			return fmt.Errorf(
+				"%w: field=tool_result reason=forbidden type=%s run_id=%q step=%d",
+				ErrEventInvalid,
+				event.Type,
+				event.RunID,
+				event.Step,
+			)
+		}
 	}
 
 	return nil
+}
+
+func isKnownEventType(eventType EventType) bool {
+	switch eventType {
+	case EventTypeCommandApplied,
+		EventTypeRunStarted,
+		EventTypeAssistantMessage,
+		EventTypeToolResult,
+		EventTypeRunCompleted,
+		EventTypeRunFailed,
+		EventTypeRunCancelled,
+		EventTypeRunCheckpoint:
+		return true
+	default:
+		return false
+	}
 }
