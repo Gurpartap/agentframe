@@ -29,6 +29,42 @@ func TestRegistryExecute_UnknownToolReturnsError(t *testing.T) {
 	}
 }
 
+func TestRegistryExecute_EmptyToolNameReturnsError(t *testing.T) {
+	t.Parallel()
+
+	registry := toolingregistry.New(nil)
+	result, err := registry.Execute(context.Background(), agent.ToolCall{ID: "call-empty"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !errors.Is(err, toolingregistry.ErrToolNameEmpty) {
+		t.Fatalf("expected ErrToolNameEmpty, got %v", err)
+	}
+	if result != (agent.ToolResult{}) {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestRegistryExecute_EmptyToolNameFailsBeforeHandlerLookup(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	registry := toolingregistry.New(map[string]toolingregistry.Handler{
+		"": func(_ context.Context, _ map[string]any) (string, error) {
+			called = true
+			return "should-not-run", nil
+		},
+	})
+
+	_, err := registry.Execute(context.Background(), agent.ToolCall{ID: "call-empty", Name: ""})
+	if !errors.Is(err, toolingregistry.ErrToolNameEmpty) {
+		t.Fatalf("expected ErrToolNameEmpty, got %v", err)
+	}
+	if called {
+		t.Fatalf("handler must not be invoked for empty tool name")
+	}
+}
+
 func TestRegistryExecute_NormalizesResult(t *testing.T) {
 	t.Parallel()
 

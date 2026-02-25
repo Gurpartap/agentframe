@@ -12,6 +12,7 @@ import (
 var (
 	ErrToolUnregistered = errors.New("tool is not registered")
 	ErrNilHandler       = errors.New("tool handler is nil")
+	ErrToolNameEmpty    = errors.New("tool name is empty")
 )
 
 // Handler executes one tool call using parsed arguments.
@@ -38,6 +39,10 @@ func (r *Registry) Register(name string, handler Handler) {
 }
 
 func (r *Registry) Execute(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	if call.Name == "" {
+		return agent.ToolResult{}, fmt.Errorf("%w: call %q", ErrToolNameEmpty, call.ID)
+	}
+
 	r.mu.RLock()
 	handler, ok := r.handlers[call.Name]
 	r.mu.RUnlock()
