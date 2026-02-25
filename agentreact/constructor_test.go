@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"agentruntime/agent"
@@ -125,4 +126,89 @@ func TestExecute_NilContextFailsFastWithoutEventEmission(t *testing.T) {
 	if gotEvents := events.Events(); len(gotEvents) != 0 {
 		t.Fatalf("expected no events on nil-context rejection, got %d", len(gotEvents))
 	}
+}
+
+func TestExecute_InvalidToolDefinitionsFailFastWithoutSideEffects(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name    string
+		tools   []agent.ToolDefinition
+		wantErr string
+	}{
+		{
+			name: "empty tool name",
+			tools: []agent.ToolDefinition{
+				{Name: ""},
+			},
+			wantErr: "tool definitions are invalid: index=0 reason=empty_name",
+		},
+		{
+			name: "duplicate tool names",
+			tools: []agent.ToolDefinition{
+				{Name: "lookup"},
+				{Name: "lookup"},
+			},
+			wantErr: "tool definitions are invalid: index=1 name=\"lookup\" reason=duplicate_name first_index=0",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			model := newScriptedModel(response{
+				Message: agent.Message{
+					Role:    agent.RoleAssistant,
+					Content: "unexpected",
+				},
+			})
+			executor := &countingToolExecutor{}
+			events := newEventSink()
+			loop, err := agentreact.New(model, executor, events)
+			if err != nil {
+				t.Fatalf("new loop: %v", err)
+			}
+
+			initial := agent.RunState{
+				ID:     "invalid-tools-execute",
+				Status: agent.RunStatusPending,
+				Messages: []agent.Message{
+					{Role: agent.RoleUser, Content: "hello"},
+				},
+			}
+			next, execErr := loop.Execute(context.Background(), initial, agent.EngineInput{
+				MaxSteps: 2,
+				Tools:    tc.tools,
+			})
+			if !errors.Is(execErr, agent.ErrToolDefinitionsInvalid) {
+				t.Fatalf("expected ErrToolDefinitionsInvalid, got %v", execErr)
+			}
+			if execErr == nil || execErr.Error() != tc.wantErr {
+				t.Fatalf("unexpected error text: got=%v want=%q", execErr, tc.wantErr)
+			}
+			if !reflect.DeepEqual(next, initial) {
+				t.Fatalf("state changed on invalid tool definitions: got=%+v want=%+v", next, initial)
+			}
+			if model.index != 0 {
+				t.Fatalf("model should not be invoked on invalid tool definitions, calls=%d", model.index)
+			}
+			if executor.calls.Load() != 0 {
+				t.Fatalf("executor should not be invoked on invalid tool definitions, calls=%d", executor.calls.Load())
+			}
+			if gotEvents := events.Events(); len(gotEvents) != 0 {
+				t.Fatalf("expected no events on invalid tool definitions rejection, got %d", len(gotEvents))
+			}
+		})
+	}
+}
+
+type countingToolExecutor struct {
+	calls atomic.Int32
+}
+
+func (e *countingToolExecutor) Execute(context.Context, agent.ToolCall) (agent.ToolResult, error) {
+	e.calls.Add(1)
+	return agent.ToolResult{Content: "unexpected"}, nil
 }
