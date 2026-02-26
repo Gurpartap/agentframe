@@ -8,6 +8,7 @@ type StartRequest struct {
 }
 
 type ContinueRequest struct {
+	CommandID  string      `json:"command_id,omitempty"`
 	MaxSteps   *int        `json:"max_steps,omitempty"`
 	Resolution *Resolution `json:"resolution,omitempty"`
 }

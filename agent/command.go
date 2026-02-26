@@ -28,6 +28,7 @@ func (StartCommand) Kind() CommandKind {
 // ContinueCommand continues an existing non-terminal run.
 type ContinueCommand struct {
 	RunID      RunID
+	CommandID  string
 	MaxSteps   int
 	Tools      []ToolDefinition
 	Resolution *Resolution

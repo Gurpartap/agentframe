@@ -17,6 +17,7 @@ type startRequest struct {
 }
 
 type continueRequest struct {
+	CommandID  string             `json:"command_id,omitempty"`
 	MaxSteps   *int               `json:"max_steps"`
 	Resolution *resolutionRequest `json:"resolution"`
 }
@@ -101,13 +102,13 @@ func (h *handlers) handleRunContinue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.runtime.Runner.Continue(
-		r.Context(),
-		runID,
-		maxSteps,
-		h.runtime.ToolDefinitions,
-		toResolution(request.Resolution),
-	)
+	result, err := h.runtime.Runner.Dispatch(r.Context(), agent.ContinueCommand{
+		RunID:      runID,
+		CommandID:  strings.TrimSpace(request.CommandID),
+		MaxSteps:   maxSteps,
+		Tools:      h.runtime.ToolDefinitions,
+		Resolution: toResolution(request.Resolution),
+	})
 	if err != nil && !isAcceptedRunError(err) {
 		writeMappedError(w, err)
 		return

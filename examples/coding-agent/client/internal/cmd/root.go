@@ -24,7 +24,7 @@ Commands:
   start --user-prompt <text> [--run-id <id>] [--system-prompt <text>] [--max-steps <n>]
   get <run-id>
   events <run-id> [--cursor <n>]
-  continue <run-id> [--max-steps <n>] [--requirement-id <id> --kind <kind> --outcome <outcome> [--value <value>]]
+  continue <run-id> [--command-id <id>] [--max-steps <n>] [--requirement-id <id> --kind <kind> --outcome <outcome> [--value <value>]]
   steer <run-id> --instruction <text>
   follow-up <run-id> --prompt <text> [--max-steps <n>]
   cancel <run-id>
@@ -205,6 +205,7 @@ func runContinue(ctx context.Context, client *api.Client, jsonMode bool, args []
 	runID := strings.TrimSpace(args[0])
 
 	fs := flag.NewFlagSet("continue", flag.ContinueOnError)
+	commandID := fs.String("command-id", "", "idempotency key for retry-safe continue")
 	maxSteps := fs.Int("max-steps", -1, "max command steps")
 	requirementID := fs.String("requirement-id", "", "requirement identifier")
 	kind := fs.String("kind", "", "requirement kind")
@@ -218,6 +219,7 @@ func runContinue(ctx context.Context, client *api.Client, jsonMode bool, args []
 	}
 
 	request := api.ContinueRequest{}
+	request.CommandID = strings.TrimSpace(*commandID)
 	optionalMaxSteps, err := parseOptionalMaxSteps(*maxSteps)
 	if err != nil {
 		return err

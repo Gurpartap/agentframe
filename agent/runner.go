@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -18,11 +19,12 @@ type Dependencies struct {
 
 // Runner owns the run lifecycle and persistence.
 type Runner struct {
-	idGen        IDGenerator
-	store        RunStore
-	engine       Engine
-	events       EventSink
-	commandLocks *runCommandLocks
+	idGen           IDGenerator
+	store           RunStore
+	engine          Engine
+	events          EventSink
+	commandLocks    *runCommandLocks
+	commandOutcomes *commandIdempotencyStore
 }
 
 type runCommandLocks struct {
@@ -35,10 +37,57 @@ type runCommandLock struct {
 	refCount int
 }
 
+type commandIdempotencyKey struct {
+	runID       RunID
+	commandKind CommandKind
+	commandID   string
+}
+
+type commandIdempotencyOutcome struct {
+	result RunResult
+	err    error
+}
+
+type commandIdempotencyStore struct {
+	mu      sync.Mutex
+	entries map[commandIdempotencyKey]commandIdempotencyOutcome
+}
+
 func newRunCommandLocks() *runCommandLocks {
 	return &runCommandLocks{
 		entries: make(map[RunID]*runCommandLock),
 	}
+}
+
+func newCommandIdempotencyStore() *commandIdempotencyStore {
+	return &commandIdempotencyStore{
+		entries: make(map[commandIdempotencyKey]commandIdempotencyOutcome),
+	}
+}
+
+func (s *commandIdempotencyStore) load(key commandIdempotencyKey) (RunResult, error, bool) {
+	if s == nil {
+		return RunResult{}, nil, false
+	}
+	s.mu.Lock()
+	outcome, exists := s.entries[key]
+	s.mu.Unlock()
+	if !exists {
+		return RunResult{}, nil, false
+	}
+	return cloneRunResult(outcome.result), outcome.err, true
+}
+
+func (s *commandIdempotencyStore) store(key commandIdempotencyKey, result RunResult, err error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.entries[key] = commandIdempotencyOutcome{
+		result: cloneRunResult(result),
+		err:    err,
+	}
+	s.mu.Unlock()
 }
 
 func (l *runCommandLocks) lock(runID RunID) func() {
@@ -78,11 +127,12 @@ func NewRunner(deps Dependencies) (*Runner, error) {
 		deps.EventSink = noopEventSink{}
 	}
 	return &Runner{
-		idGen:        deps.IDGenerator,
-		store:        deps.RunStore,
-		engine:       deps.Engine,
-		events:       deps.EventSink,
-		commandLocks: newRunCommandLocks(),
+		idGen:           deps.IDGenerator,
+		store:           deps.RunStore,
+		engine:          deps.Engine,
+		events:          deps.EventSink,
+		commandLocks:    newRunCommandLocks(),
+		commandOutcomes: newCommandIdempotencyStore(),
 	}, nil
 }
 
@@ -345,6 +395,27 @@ func sideEffectContext(ctx context.Context) context.Context {
 	return ctx
 }
 
+func cloneRunResult(in RunResult) RunResult {
+	return RunResult{
+		State: CloneRunState(in.State),
+	}
+}
+
+func continueIdempotencyKey(runID RunID, commandID string) (commandIdempotencyKey, bool) {
+	if runID == "" {
+		return commandIdempotencyKey{}, false
+	}
+	normalizedCommandID := strings.TrimSpace(commandID)
+	if normalizedCommandID == "" {
+		return commandIdempotencyKey{}, false
+	}
+	return commandIdempotencyKey{
+		runID:       runID,
+		commandKind: CommandKindContinue,
+		commandID:   normalizedCommandID,
+	}, true
+}
+
 func (r *Runner) lockRunMutation(runID RunID) func() {
 	if runID == "" || r.commandLocks == nil {
 		return func() {}
@@ -543,6 +614,12 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 	if runID == "" {
 		return RunResult{}, fmt.Errorf("%w: command=%s", ErrInvalidRunID, CommandKindContinue)
 	}
+	idempotencyKey, hasIdempotencyKey := continueIdempotencyKey(runID, cmd.CommandID)
+	if hasIdempotencyKey {
+		if cachedResult, cachedErr, exists := r.commandOutcomes.load(idempotencyKey); exists {
+			return cachedResult, cachedErr
+		}
+	}
 	if err := validateToolDefinitions(CommandKindContinue, cmd.Tools); err != nil {
 		return RunResult{}, err
 	}
@@ -616,7 +693,12 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 		CommandKind: CommandKindContinue,
 		Description: "continue command applied",
 	}))
-	return RunResult{State: finalState}, errors.Join(runErr, eventErr)
+	result := RunResult{State: finalState}
+	resultErr := errors.Join(runErr, eventErr)
+	if hasIdempotencyKey {
+		r.commandOutcomes.store(idempotencyKey, result, resultErr)
+	}
+	return result, resultErr
 }
 
 // Cancel marks a non-terminal run as cancelled and persists the cancellation state.

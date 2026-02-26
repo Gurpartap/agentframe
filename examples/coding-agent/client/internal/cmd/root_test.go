@@ -77,7 +77,7 @@ func TestExecuteCommandCoverage(t *testing.T) {
 		},
 		{
 			name:        "continue",
-			commandArgs: []string{"continue", "run-000001", "--max-steps", "3", "--requirement-id", "req-1", "--kind", "approval", "--outcome", "approved", "--value", "ok"},
+			commandArgs: []string{"continue", "run-000001", "--command-id", "continue-1", "--max-steps", "3", "--requirement-id", "req-1", "--kind", "approval", "--outcome", "approved", "--value", "ok"},
 			method:      http.MethodPost,
 			path:        "/v1/runs/run-000001/continue",
 			wantAuth:    true,
@@ -89,6 +89,9 @@ func TestExecuteCommandCoverage(t *testing.T) {
 				}
 				if decoded["max_steps"] != float64(3) {
 					t.Fatalf("continue max_steps mismatch: %#v", decoded["max_steps"])
+				}
+				if decoded["command_id"] != "continue-1" {
+					t.Fatalf("continue command_id mismatch: %#v", decoded["command_id"])
 				}
 				resolution, ok := decoded["resolution"].(map[string]any)
 				if !ok {
