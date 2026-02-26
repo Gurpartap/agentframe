@@ -1,20 +1,16 @@
 # Coding Agent Client
 
-This client controls the coding-agent HTTP API from the terminal.
+This app root hosts the CLI for controlling coding-agent runs.
 
 ## Start The Server
 
-From `examples/coding-agent`:
-
-```bash
-go run ./cmd/server
-```
+Start the server using the instructions in [../server/README.md](../server/README.md).
 
 Default server address: `http://127.0.0.1:8080`
 
 ## Run The Client
 
-From `examples/coding-agent`:
+All commands below assume your current directory is `examples/coding-agent/client`.
 
 ```bash
 go run ./cmd/client --help
@@ -26,6 +22,35 @@ Global flags:
 - `--token` (default `coding-agent-dev-token`)
 - `--json` (print raw API payload)
 - `--timeout` (default `15s`)
+
+## Chat Mode
+
+Start chat:
+
+```bash
+go run ./cmd/client chat
+```
+
+Slash commands:
+
+- `/start <prompt>`
+- `/status`
+- `/continue [--max-steps <n>]`
+- `/steer <instruction>`
+- `/followup <prompt>`
+- `/cancel`
+- `/quit`
+
+Free text is treated as `/followup <text>` on the active run.
+
+If a run is suspended, `/continue` prompts for:
+
+1. `requirement_id`
+2. `kind` (`approval`, `user_input`, `external_execution`)
+3. `outcome` (`approved`, `rejected`, `provided`, `completed`)
+4. optional `value`
+
+The client then submits a typed resolution payload through `continue`.
 
 ## Non-Interactive Commands
 
@@ -96,35 +121,6 @@ Cancel:
 ```bash
 go run ./cmd/client cancel run-000001
 ```
-
-## Chat Mode
-
-Start chat:
-
-```bash
-go run ./cmd/client chat
-```
-
-Slash commands:
-
-- `/start <prompt>`
-- `/status`
-- `/continue [--max-steps <n>]`
-- `/steer <instruction>`
-- `/followup <prompt>`
-- `/cancel`
-- `/quit`
-
-Free text is treated as `/followup <text>` on the active run.
-
-If a run is suspended, `/continue` prompts for:
-
-1. `requirement_id`
-2. `kind` (`approval`, `user_input`, `external_execution`)
-3. `outcome` (`approved`, `rejected`, `provided`, `completed`)
-4. optional `value`
-
-The client then submits a typed resolution payload through `continue`.
 
 ## Troubleshooting
 
