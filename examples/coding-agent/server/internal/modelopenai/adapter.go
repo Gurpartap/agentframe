@@ -163,9 +163,14 @@ type chatToolCallFunction struct {
 }
 
 func buildRequest(model string, request agentreact.ModelRequest) (chatCompletionRequest, error) {
-	messages := make([]chatMessage, len(request.Messages))
-	for i := range request.Messages {
-		converted, err := toChatMessage(request.Messages[i])
+	normalizedMessages, err := normalizeProviderMessages(request.Messages)
+	if err != nil {
+		return chatCompletionRequest{}, err
+	}
+
+	messages := make([]chatMessage, len(normalizedMessages))
+	for i := range normalizedMessages {
+		converted, err := toChatMessage(normalizedMessages[i])
 		if err != nil {
 			return chatCompletionRequest{}, err
 		}
@@ -189,6 +194,48 @@ func buildRequest(model string, request agentreact.ModelRequest) (chatCompletion
 		Messages: messages,
 		Tools:    tools,
 	}, nil
+}
+
+func normalizeProviderMessages(messages []agent.Message) ([]agent.Message, error) {
+	normalized := make([]agent.Message, 0, len(messages))
+	assistantToolCalls := make(map[string]struct{}, len(messages))
+	toolMessageIndexByCallID := make(map[string]int, len(messages))
+
+	for i := range messages {
+		message := agent.CloneMessage(messages[i])
+		switch message.Role {
+		case agent.RoleAssistant:
+			normalized = append(normalized, message)
+			for _, call := range message.ToolCalls {
+				if call.ID == "" {
+					continue
+				}
+				assistantToolCalls[call.ID] = struct{}{}
+			}
+		case agent.RoleTool:
+			toolCallID := strings.TrimSpace(message.ToolCallID)
+			if toolCallID == "" {
+				return nil, fmt.Errorf("decode messages: tool message at index %d missing tool_call_id", i)
+			}
+			if _, ok := assistantToolCalls[toolCallID]; !ok {
+				return nil, fmt.Errorf(
+					"decode messages: tool message at index %d references unknown tool_call_id %q",
+					i,
+					toolCallID,
+				)
+			}
+			if existingIndex, exists := toolMessageIndexByCallID[toolCallID]; exists {
+				// Keep only the latest tool observation for a call in provider payloads.
+				normalized[existingIndex] = message
+			} else {
+				normalized = append(normalized, message)
+				toolMessageIndexByCallID[toolCallID] = len(normalized) - 1
+			}
+		default:
+			normalized = append(normalized, message)
+		}
+	}
+	return normalized, nil
 }
 
 func toChatMessage(message agent.Message) (chatMessage, error) {
