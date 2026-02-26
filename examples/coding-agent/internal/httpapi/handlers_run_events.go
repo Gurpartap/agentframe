@@ -7,16 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Gurpartap/agentframe/agent"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runstream"
 )
 
 const streamPollInterval = 25 * time.Millisecond
-
-type streamEventPayload struct {
-	RunID string      `json:"run_id"`
-	Event agent.Event `json:"event"`
-}
 
 func (h *handlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	if !h.ensureRuntime(w) {
@@ -52,14 +46,15 @@ func (h *handlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	encoder := json.NewEncoder(w)
 
 	for _, streamEvent := range buffered {
-		if err := writeSSEEvent(w, flusher, streamEvent); err != nil {
+		if err := writeNDJSONEvent(encoder, flusher, streamEvent); err != nil {
 			return
 		}
 		cursor = streamEvent.ID
@@ -78,7 +73,7 @@ func (h *handlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			for _, streamEvent := range next {
-				if err := writeSSEEvent(w, flusher, streamEvent); err != nil {
+				if err := writeNDJSONEvent(encoder, flusher, streamEvent); err != nil {
 					return
 				}
 				cursor = streamEvent.ID
@@ -100,25 +95,10 @@ func parseCursor(r *http.Request) (int64, error) {
 	return cursor, nil
 }
 
-func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, streamEvent runstream.StreamEvent) error {
-	payload, err := json.Marshal(streamEventPayload{
-		RunID: string(streamEvent.Event.RunID),
-		Event: streamEvent.Event,
-	})
-	if err != nil {
+func writeNDJSONEvent(encoder *json.Encoder, flusher http.Flusher, streamEvent runstream.StreamEvent) error {
+	if err := encoder.Encode(streamEvent); err != nil {
 		return err
 	}
-
-	if _, err := fmt.Fprintf(w, "id: %d\n", streamEvent.ID); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(w, "event: run_event"); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
-		return err
-	}
-
 	flusher.Flush()
 	return nil
 }

@@ -18,14 +18,8 @@ import (
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policyauth"
 )
 
-type sseFrame struct {
-	ID      int64
-	Name    string
-	Payload streamPayload
-}
-
-type streamPayload struct {
-	RunID string      `json:"run_id"`
+type streamLine struct {
+	ID    int64       `json:"id"`
 	Event agent.Event `json:"event"`
 }
 
@@ -47,7 +41,7 @@ func TestRunEventsOrdering(t *testing.T) {
 		t.Fatalf("start status mismatch: got=%s want=%s", started.Status, agent.RunStatusMaxStepsExceeded)
 	}
 
-	frames := readSSEFrames(
+	frames := readNDJSONFrames(
 		t,
 		server.Client(),
 		server.URL+"/v1/runs/"+started.RunID+"/events?cursor=0",
@@ -67,17 +61,11 @@ func TestRunEventsOrdering(t *testing.T) {
 		if frames[i].ID != int64(i+1) {
 			t.Fatalf("event id mismatch at index %d: got=%d want=%d", i, frames[i].ID, i+1)
 		}
-		if frames[i].Name != "run_event" {
-			t.Fatalf("event name mismatch at index %d: got=%q want=%q", i, frames[i].Name, "run_event")
+		if string(frames[i].Event.RunID) != started.RunID {
+			t.Fatalf("event run_id mismatch at index %d: got=%q want=%q", i, frames[i].Event.RunID, started.RunID)
 		}
-		if frames[i].Payload.RunID != started.RunID {
-			t.Fatalf("payload run_id mismatch at index %d: got=%q want=%q", i, frames[i].Payload.RunID, started.RunID)
-		}
-		if string(frames[i].Payload.Event.RunID) != started.RunID {
-			t.Fatalf("event run_id mismatch at index %d: got=%q want=%q", i, frames[i].Payload.Event.RunID, started.RunID)
-		}
-		if frames[i].Payload.Event.Type != expectedTypes[i] {
-			t.Fatalf("event type mismatch at index %d: got=%s want=%s", i, frames[i].Payload.Event.Type, expectedTypes[i])
+		if frames[i].Event.Type != expectedTypes[i] {
+			t.Fatalf("event type mismatch at index %d: got=%s want=%s", i, frames[i].Event.Type, expectedTypes[i])
 		}
 	}
 }
@@ -100,7 +88,7 @@ func TestRunEventsReconnectFromCursor(t *testing.T) {
 		t.Fatalf("start status mismatch: got=%s want=%s", started.Status, agent.RunStatusMaxStepsExceeded)
 	}
 
-	initialFrames := readSSEFrames(
+	initialFrames := readNDJSONFrames(
 		t,
 		server.Client(),
 		server.URL+"/v1/runs/"+started.RunID+"/events?cursor=0",
@@ -157,7 +145,7 @@ func TestRunEventsReconnectFromCursor(t *testing.T) {
 		followUpDone <- nil
 	}()
 
-	reconnectedFrames := readSSEFrames(
+	reconnectedFrames := readNDJSONFrames(
 		t,
 		server.Client(),
 		server.URL+"/v1/runs/"+started.RunID+"/events?cursor="+strconv.FormatInt(lastID, 10),
@@ -183,8 +171,8 @@ func TestRunEventsReconnectFromCursor(t *testing.T) {
 		if reconnectedFrames[i].ID <= lastID {
 			t.Fatalf("reconnect replayed old id at index %d: got=%d last_seen=%d", i, reconnectedFrames[i].ID, lastID)
 		}
-		if reconnectedFrames[i].Payload.Event.Type != expectedTypes[i] {
-			t.Fatalf("reconnect event type mismatch at index %d: got=%s want=%s", i, reconnectedFrames[i].Payload.Event.Type, expectedTypes[i])
+		if reconnectedFrames[i].Event.Type != expectedTypes[i] {
+			t.Fatalf("reconnect event type mismatch at index %d: got=%s want=%s", i, reconnectedFrames[i].Event.Type, expectedTypes[i])
 		}
 	}
 }
@@ -265,13 +253,13 @@ func TestRunEventsInvalidAndExpiredCursor(t *testing.T) {
 	}
 }
 
-func readSSEFrames(
+func readNDJSONFrames(
 	t *testing.T,
 	client *http.Client,
 	url string,
 	wantFrames int,
 	timeout time.Duration,
-) []sseFrame {
+) []streamLine {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -299,69 +287,32 @@ func readSSEFrames(
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 
-	frames := make([]sseFrame, 0, wantFrames)
-	var currentID int64
-	var hasID bool
-	currentName := ""
-	dataLines := make([]string, 0, 1)
-
-	commitFrame := func() {
-		if len(dataLines) == 0 {
-			hasID = false
-			currentName = ""
-			return
-		}
-		if !hasID {
-			t.Fatalf("stream frame missing id")
-		}
-
-		payloadRaw := strings.Join(dataLines, "\n")
-		var payload streamPayload
-		if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
-			t.Fatalf("decode stream payload: %v raw=%s", err, payloadRaw)
-		}
-
-		frames = append(frames, sseFrame{
-			ID:      currentID,
-			Name:    currentName,
-			Payload: payload,
-		})
-
-		hasID = false
-		currentName = ""
-		dataLines = dataLines[:0]
-		if len(frames) >= wantFrames {
-			cancel()
-		}
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "application/x-ndjson") {
+		t.Fatalf("stream content type mismatch: got=%q want contains %q", contentType, "application/x-ndjson")
 	}
+
+	frames := make([]streamLine, 0, wantFrames)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
-			commitFrame()
-			if len(frames) >= wantFrames {
-				break
-			}
 			continue
 		}
-		switch {
-		case strings.HasPrefix(line, "id:"):
-			idText := strings.TrimSpace(strings.TrimPrefix(line, "id:"))
-			parsed, err := strconv.ParseInt(idText, 10, 64)
-			if err != nil {
-				t.Fatalf("parse stream id %q: %v", idText, err)
-			}
-			currentID = parsed
-			hasID = true
-		case strings.HasPrefix(line, "event:"):
-			currentName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-		}
-	}
 
-	if len(dataLines) > 0 && len(frames) < wantFrames {
-		commitFrame()
+		var frame streamLine
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatalf("decode stream payload: %v raw=%s", err, line)
+		}
+		if frame.ID <= 0 {
+			t.Fatalf("stream frame missing valid id: got=%d", frame.ID)
+		}
+
+		frames = append(frames, frame)
+		if len(frames) >= wantFrames {
+			cancel()
+			break
+		}
 	}
 
 	if len(frames) < wantFrames {
