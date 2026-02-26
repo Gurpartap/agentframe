@@ -20,6 +20,7 @@ Commands:
   health
   start --user-prompt <text> [--run-id <id>] [--system-prompt <text>] [--max-steps <n>]
   get <run-id>
+  events <run-id> [--cursor <n>]
   continue <run-id> [--max-steps <n>] [--requirement-id <id> --kind <kind> --outcome <outcome> [--value <value>]]
   steer <run-id> --instruction <text>
   follow-up <run-id> --prompt <text> [--max-steps <n>]
@@ -95,6 +96,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return runStart(ctx, api, cfg.JSON, commandArgs, stdout)
 	case "get":
 		return runGet(ctx, api, cfg.JSON, commandArgs, stdout)
+	case "events":
+		return runEvents(ctx, cfg.BaseURL, cfg.JSON, commandArgs, stdout)
 	case "continue":
 		return runContinue(ctx, api, cfg.JSON, commandArgs, stdout)
 	case "steer":
