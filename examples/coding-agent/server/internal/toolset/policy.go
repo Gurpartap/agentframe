@@ -28,6 +28,7 @@ var (
 	ErrArgumentInvalid       = errors.New("tool arguments are invalid")
 	ErrBashCommandEmpty      = errors.New("bash command is empty")
 	ErrBashCommandDenied     = errors.New("bash command violates policy")
+	ErrBashReplayMismatch    = errors.New("bash replay override mismatch")
 	ErrBashExecutionTimedOut = errors.New("bash command timed out")
 )
 

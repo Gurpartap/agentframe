@@ -121,13 +121,14 @@ func TestExecutorBashPolicyRejectsForbiddenToken(t *testing.T) {
 	}
 	executor := toolset.NewExecutor(policy)
 
-	_, err = executor.Execute(context.Background(), agent.ToolCall{
+	call := agent.ToolCall{
 		ID:   "bash-denied-1",
 		Name: toolset.ToolBash,
 		Arguments: map[string]any{
 			"command": "ls; pwd",
 		},
-	})
+	}
+	_, err = executor.Execute(context.Background(), call)
 	var suspendErr *agent.SuspendRequestError
 	if !errors.As(err, &suspendErr) {
 		t.Fatalf("expected SuspendRequestError, got %T (%v)", err, err)
@@ -152,6 +153,22 @@ func TestExecutorBashPolicyRejectsForbiddenToken(t *testing.T) {
 	}
 	if !errors.Is(err, toolset.ErrBashCommandDenied) {
 		t.Fatalf("expected ErrBashCommandDenied, got %v", err)
+	}
+
+	_, err = executor.Execute(context.Background(), call)
+	var repeatedSuspendErr *agent.SuspendRequestError
+	if !errors.As(err, &repeatedSuspendErr) {
+		t.Fatalf("expected repeated SuspendRequestError, got %T (%v)", err, err)
+	}
+	if repeatedSuspendErr.Requirement == nil {
+		t.Fatalf("expected repeated suspend requirement payload")
+	}
+	if repeatedSuspendErr.Requirement.Fingerprint != suspendErr.Requirement.Fingerprint {
+		t.Fatalf(
+			"fingerprint must be deterministic for same denied call: got=%q want=%q",
+			repeatedSuspendErr.Requirement.Fingerprint,
+			suspendErr.Requirement.Fingerprint,
+		)
 	}
 }
 
@@ -194,6 +211,58 @@ func TestExecutorBashPolicyApprovedReplayOverrideBypassesSuspendRequest(t *testi
 	}
 	if !strings.Contains(result.Content, "bash_ok") {
 		t.Fatalf("unexpected replayed content: %q", result.Content)
+	}
+
+	_, err = executor.Execute(context.Background(), call)
+	var resuspendedErr *agent.SuspendRequestError
+	if !errors.As(err, &resuspendedErr) {
+		t.Fatalf("expected suspension after replay when override is absent, got %T (%v)", err, err)
+	}
+}
+
+func TestExecutorBashPolicyReplayOverrideMismatchReturnsContractError(t *testing.T) {
+	t.Parallel()
+
+	policy, err := toolset.NewPolicy(t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatalf("new policy: %v", err)
+	}
+	executor := toolset.NewExecutor(policy)
+
+	call := agent.ToolCall{
+		ID:   "bash-denied-replay-mismatch-1",
+		Name: toolset.ToolBash,
+		Arguments: map[string]any{
+			"command": "ls; pwd",
+		},
+	}
+
+	_, err = executor.Execute(context.Background(), call)
+	var suspendErr *agent.SuspendRequestError
+	if !errors.As(err, &suspendErr) {
+		t.Fatalf("expected SuspendRequestError, got %T (%v)", err, err)
+	}
+	if suspendErr.Requirement == nil {
+		t.Fatalf("expected suspend requirement payload")
+	}
+
+	override := agent.ApprovedToolCallReplayOverride{
+		ToolCallID:  suspendErr.Requirement.ToolCallID,
+		Fingerprint: suspendErr.Requirement.Fingerprint + "-mismatch",
+	}
+	_, err = executor.Execute(agent.WithApprovedToolCallReplayOverride(context.Background(), override), call)
+	if !errors.Is(err, toolset.ErrBashReplayMismatch) {
+		t.Fatalf("expected ErrBashReplayMismatch, got %v", err)
+	}
+	if errors.Is(err, toolset.ErrBashCommandDenied) {
+		t.Fatalf("mismatch override must not fall back to policy deny suspension: %v", err)
+	}
+	var mismatchSuspendErr *agent.SuspendRequestError
+	if errors.As(err, &mismatchSuspendErr) {
+		t.Fatalf("mismatch override must return contract error, got suspension payload")
+	}
+	if !strings.Contains(err.Error(), "approved_tool_replay_override") {
+		t.Fatalf("unexpected mismatch error: %q", err.Error())
 	}
 }
 

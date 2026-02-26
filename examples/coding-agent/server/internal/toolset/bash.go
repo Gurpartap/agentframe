@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -20,7 +21,10 @@ func (e *Executor) executeBash(ctx context.Context, call agent.ToolCall) (string
 	}
 	if err := e.policy.ValidateBashCommand(command); err != nil {
 		if errors.Is(err, ErrBashCommandDenied) {
-			fingerprint := bashApprovalFingerprint(call.ID, command)
+			fingerprint := bashApprovalFingerprint(call, command, e.policy)
+			if err := validateApprovedBashReplay(ctx, call.ID, fingerprint); err != nil {
+				return "", err
+			}
 			if !approvedBashReplay(ctx, call.ID, fingerprint) {
 				return "", &agent.SuspendRequestError{
 					Requirement: &agent.PendingRequirement{
@@ -79,8 +83,21 @@ func (e *Executor) executeBash(ctx context.Context, call agent.ToolCall) (string
 	), nil
 }
 
-func bashApprovalFingerprint(callID, command string) string {
-	sum := sha256.Sum256([]byte(callID + "\n" + strings.TrimSpace(command)))
+func bashApprovalFingerprint(call agent.ToolCall, command string, policy Policy) string {
+	payload, _ := json.Marshal(struct {
+		ToolName      string `json:"tool_name"`
+		CallID        string `json:"call_id"`
+		Command       string `json:"command"`
+		WorkspaceRoot string `json:"workspace_root"`
+		BashTimeoutNS int64  `json:"bash_timeout_ns"`
+	}{
+		ToolName:      call.Name,
+		CallID:        call.ID,
+		Command:       strings.TrimSpace(command),
+		WorkspaceRoot: policy.WorkspaceRoot(),
+		BashTimeoutNS: int64(policy.BashTimeout()),
+	})
+	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
 
@@ -90,4 +107,22 @@ func approvedBashReplay(ctx context.Context, callID, fingerprint string) bool {
 		return false
 	}
 	return override.ToolCallID == callID && override.Fingerprint == fingerprint
+}
+
+func validateApprovedBashReplay(ctx context.Context, callID, fingerprint string) error {
+	override, ok := agent.ApprovedToolCallReplayOverrideFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	if override.ToolCallID == callID && override.Fingerprint == fingerprint {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: field=approved_tool_replay_override reason=mismatch got_tool_call_id=%q got_fingerprint=%q want_tool_call_id=%q want_fingerprint=%q",
+		ErrBashReplayMismatch,
+		override.ToolCallID,
+		override.Fingerprint,
+		callID,
+		fingerprint,
+	)
 }
