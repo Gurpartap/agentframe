@@ -1572,16 +1572,36 @@ func TestConformance_ContinueFromToolSuspensionWithMatchingResolution(t *testing
 	}
 
 	gotEvents := events.Events()
-	assertEventSubsequence(t, gotEvents, []eventExpectation{
-		{Type: agent.EventTypeRunStarted, Step: 0, CheckStep: true},
-		{Type: agent.EventTypeAssistantMessage, Step: 1, CheckStep: true},
-		{Type: agent.EventTypeToolResult, Step: 1, CheckStep: true},
-		{Type: agent.EventTypeRunSuspended, Step: 1, CheckStep: true},
-		{Type: agent.EventTypeCommandApplied, Step: 1, CheckStep: true, CommandKind: agent.CommandKindStart},
-		{Type: agent.EventTypeAssistantMessage, Step: 2, CheckStep: true},
-		{Type: agent.EventTypeRunCompleted, Step: 2, CheckStep: true},
-		{Type: agent.EventTypeCommandApplied, Step: 2, CheckStep: true, CommandKind: agent.CommandKindContinue},
-	})
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeToolResult,
+		agent.EventTypeRunSuspended,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	wantSteps := []int{0, 1, 1, 1, 1, 1, 2, 2, 2, 2}
+	if len(gotEvents) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(gotEvents), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if gotEvents[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, gotEvents[i].Type, wantTypes[i])
+		}
+		if gotEvents[i].Step != wantSteps[i] {
+			t.Fatalf("event[%d] step mismatch: got=%d want=%d", i, gotEvents[i].Step, wantSteps[i])
+		}
+	}
+	if gotEvents[5].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected start command kind: got=%s want=%s", gotEvents[5].CommandKind, agent.CommandKindStart)
+	}
+	if gotEvents[9].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected continue command kind: got=%s want=%s", gotEvents[9].CommandKind, agent.CommandKindContinue)
+	}
 }
 
 func TestConformance_ToolSuspensionInvalidRequirementFailsRun(t *testing.T) {

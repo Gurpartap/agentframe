@@ -85,7 +85,7 @@ func failureEventDescription(runErr error) string {
 	if runErr == nil {
 		return "run failed"
 	}
-	return runErr.Error()
+	return fmt.Sprintf("run failed: %v", runErr)
 }
 
 func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {

@@ -312,6 +312,65 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 				assertNoCheckpointOrCommandAppliedEvents(t, events.Events())
 			},
 		},
+		{
+			name: "start_suspended_tool_origin_rejects_unlinked_tool_observation",
+			run: func(t *testing.T) {
+				t.Parallel()
+
+				const runID = agent.RunID("contract-start-tool-origin-unlinked-tool-observation")
+				events := eventinginmem.New()
+				store := runstoreinmem.New()
+				engine := &engineSpy{
+					executeFn: func(_ context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
+						next := state
+						next.Step++
+						next.Status = agent.RunStatusSuspended
+						next.PendingRequirement = &agent.PendingRequirement{
+							ID:     "req-tool-unlinked",
+							Kind:   agent.RequirementKindUserInput,
+							Origin: agent.RequirementOriginTool,
+						}
+						next.Messages = append(next.Messages, agent.Message{
+							Role:       agent.RoleTool,
+							Name:       "lookup",
+							ToolCallID: "call-unlinked",
+							Content:    "synthetic observation",
+						})
+						return next, nil
+					},
+				}
+				runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+				result, err := runner.Run(context.Background(), agent.RunInput{
+					RunID:      runID,
+					UserPrompt: "start",
+					MaxSteps:   2,
+				})
+				if !errors.Is(err, agent.ErrEngineOutputContractViolation) {
+					t.Fatalf("expected ErrEngineOutputContractViolation, got %v", err)
+				}
+				if !reflect.DeepEqual(result, agent.RunResult{}) {
+					t.Fatalf("unexpected result: %+v", result)
+				}
+
+				persisted, loadErr := store.Load(context.Background(), runID)
+				if loadErr != nil {
+					t.Fatalf("load persisted state: %v", loadErr)
+				}
+				want := agent.RunState{
+					ID:     runID,
+					Status: agent.RunStatusPending,
+					Messages: []agent.Message{
+						{Role: agent.RoleUser, Content: "start"},
+					},
+					Version: 1,
+				}
+				if !reflect.DeepEqual(persisted, want) {
+					t.Fatalf("persisted state changed: got=%+v want=%+v", persisted, want)
+				}
+				assertNoCheckpointOrCommandAppliedEvents(t, events.Events())
+			},
+		},
 	}
 
 	for _, tc := range tests {

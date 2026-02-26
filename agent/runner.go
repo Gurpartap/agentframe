@@ -180,9 +180,9 @@ func validateSuspendedRequirementProvenance(prev RunState, next RunState) error 
 			)
 		}
 	case RequirementOriginTool:
-		if !hasToolObservation(additions) {
+		if !hasLinkedToolObservation(additions) {
 			return fmt.Errorf(
-				"%w: invariant=suspension_origin_provenance reason=missing_tool_observation origin=%s requirement_id=%q run_id=%q",
+				"%w: invariant=suspension_origin_provenance reason=missing_linked_tool_observation origin=%s requirement_id=%q run_id=%q",
 				ErrEngineOutputContractViolation,
 				next.PendingRequirement.Origin,
 				next.PendingRequirement.ID,
@@ -217,9 +217,28 @@ func hasMatchingAssistantRequirement(messages []Message, requirement *PendingReq
 	return false
 }
 
-func hasToolObservation(messages []Message) bool {
+func hasLinkedToolObservation(messages []Message) bool {
+	assistantCallsByID := make(map[string]string)
 	for _, message := range messages {
-		if message.Role == RoleTool {
+		switch message.Role {
+		case RoleAssistant:
+			for _, toolCall := range message.ToolCalls {
+				if toolCall.ID == "" {
+					continue
+				}
+				assistantCallsByID[toolCall.ID] = toolCall.Name
+			}
+		case RoleTool:
+			if message.ToolCallID == "" {
+				continue
+			}
+			toolName, exists := assistantCallsByID[message.ToolCallID]
+			if !exists {
+				continue
+			}
+			if message.Name != "" && toolName != "" && message.Name != toolName {
+				continue
+			}
 			return true
 		}
 	}
