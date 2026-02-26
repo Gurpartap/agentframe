@@ -149,6 +149,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 			requirementCopy := *assistant.Requirement
 			state.PendingRequirement = &requirementCopy
 			if err := agent.TransitionRunStatus(&state, agent.RunStatusSuspended); err != nil {
+				state.PendingRequirement = nil
 				return l.failRun(ctx, state, err, eventErr)
 			}
 			return state, eventErr
@@ -182,6 +183,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 				validationErr = validateToolCallArguments(toolCall, definition)
 			}
 			result := agent.ToolResult{}
+			var suspendRequestErr *agent.SuspendRequestError
 			switch {
 			case !defined:
 				result = normalizedToolErrorResult(
@@ -201,7 +203,11 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 					if cancellationErr := contextCancellationError(ctx, toolErr); cancellationErr != nil {
 						return l.cancelRun(ctx, state, cancellationErr, eventErr)
 					}
-					result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, toolErr)
+					if errors.As(toolErr, &suspendRequestErr) {
+						result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonSuspended, toolErr)
+					} else {
+						result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, toolErr)
+					}
 				} else {
 					if identityErr := validateToolResultIdentity(toolCall, executed); identityErr != nil {
 						result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, identityErr)
@@ -225,6 +231,19 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 				Type:       agent.EventTypeToolResult,
 				ToolResult: &resultCopy,
 			}))
+			if suspendRequestErr != nil {
+				if suspendRequestErr.Requirement == nil {
+					state.PendingRequirement = nil
+				} else {
+					requirementCopy := *suspendRequestErr.Requirement
+					state.PendingRequirement = &requirementCopy
+				}
+				if err := agent.TransitionRunStatus(&state, agent.RunStatusSuspended); err != nil {
+					state.PendingRequirement = nil
+					return l.failRun(ctx, state, err, eventErr)
+				}
+				return state, eventErr
+			}
 		}
 	}
 

@@ -435,6 +435,62 @@ func TestToolFailure_ValidArgumentsUnchangedPath(t *testing.T) {
 	}
 }
 
+func TestToolFailure_SuspendedReasonNormalization(t *testing.T) {
+	t.Parallel()
+
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "calling tool that requests suspension",
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-1",
+					Name: "lookup",
+				},
+			},
+		},
+	})
+	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
+		return agent.ToolResult{}, &agent.SuspendRequestError{
+			Requirement: &agent.PendingRequirement{
+				ID:     "req-tool-suspend",
+				Kind:   agent.RequirementKindUserInput,
+				Origin: agent.RequirementOriginTool,
+			},
+		}
+	})
+
+	result, runErr, events := runToolTestExpectError(t, model, executor, []agent.ToolDefinition{
+		{Name: "lookup"},
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement on suspended result")
+	}
+	if result.State.PendingRequirement.Origin != agent.RequirementOriginTool {
+		t.Fatalf("unexpected requirement origin: %s", result.State.PendingRequirement.Origin)
+	}
+
+	toolResult := mustToolResultEvent(t, events.Events())
+	if !toolResult.IsError {
+		t.Fatalf("expected tool result error")
+	}
+	if toolResult.FailureReason != agent.ToolFailureReasonSuspended {
+		t.Fatalf("unexpected failure reason: %s", toolResult.FailureReason)
+	}
+	if !strings.Contains(toolResult.Content, string(agent.ToolFailureReasonSuspended)) {
+		t.Fatalf("unexpected tool result content: %q", toolResult.Content)
+	}
+	if result.State.Messages[2].Role != agent.RoleTool || !strings.Contains(result.State.Messages[2].Content, string(agent.ToolFailureReasonSuspended)) {
+		t.Fatalf("unexpected transcript tool message: %+v", result.State.Messages[2])
+	}
+}
+
 func TestToolCallValidation_InvalidShapeFailsRunBeforeExecution(t *testing.T) {
 	t.Parallel()
 

@@ -75,7 +75,8 @@ func suspensionEventDescription(state RunState) string {
 		return "run suspended"
 	}
 	return fmt.Sprintf(
-		"run suspended awaiting requirement kind=%s id=%q",
+		"run suspended awaiting requirement origin=%s kind=%s id=%q",
+		state.PendingRequirement.Origin,
 		state.PendingRequirement.Kind,
 		state.PendingRequirement.ID,
 	)

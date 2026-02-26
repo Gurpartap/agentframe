@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Gurpartap/agentframe/agent"
@@ -738,8 +740,9 @@ func TestConformance_ReactLoopRejectsSuspendedInputWithoutResolution(t *testing.
 		ID:     "react-loop-suspended-direct-execute",
 		Status: agent.RunStatusSuspended,
 		PendingRequirement: &agent.PendingRequirement{
-			ID:   "req-1",
-			Kind: agent.RequirementKindApproval,
+			ID:     "req-1",
+			Kind:   agent.RequirementKindApproval,
+			Origin: agent.RequirementOriginModel,
 		},
 		Messages: []agent.Message{
 			{Role: agent.RoleUser, Content: "seed"},
@@ -764,8 +767,9 @@ func TestConformance_ContinueFromSuspendedWithResolutionUsingReactLoop(t *testin
 		Status: agent.RunStatusSuspended,
 		Step:   2,
 		PendingRequirement: &agent.PendingRequirement{
-			ID:   "req-user-input",
-			Kind: agent.RequirementKindUserInput,
+			ID:     "req-user-input",
+			Kind:   agent.RequirementKindUserInput,
+			Origin: agent.RequirementOriginModel,
 		},
 		Messages: []agent.Message{
 			{Role: agent.RoleUser, Content: "seed"},
@@ -857,7 +861,7 @@ func TestConformance_ContinueFromSuspendedWithResolutionUsingReactLoop(t *testin
 	}
 }
 
-func TestConformance_RunSuspendsWhenModelEmitsRequirement(t *testing.T) {
+func TestConformance_RunSuspendsWhenModelEmitsRequirementWithOrigin(t *testing.T) {
 	t.Parallel()
 
 	runID := agent.RunID("conformance-run-suspends-on-requirement")
@@ -870,6 +874,7 @@ func TestConformance_RunSuspendsWhenModelEmitsRequirement(t *testing.T) {
 				Requirement: &agent.PendingRequirement{
 					ID:     "req-approval",
 					Kind:   agent.RequirementKindApproval,
+					Origin: agent.RequirementOriginModel,
 					Prompt: "approve execution",
 				},
 			},
@@ -967,4 +972,670 @@ func TestConformance_RunSuspendsWhenModelEmitsRequirement(t *testing.T) {
 	if gotEvents[8].CommandKind != agent.CommandKindContinue {
 		t.Fatalf("unexpected continue command kind: got=%s want=%s", gotEvents[8].CommandKind, agent.CommandKindContinue)
 	}
+}
+
+func TestConformance_ModelRequirementMissingOriginFailsRun(t *testing.T) {
+	t.Parallel()
+
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "approval required",
+			Requirement: &agent.PendingRequirement{
+				ID:   "req-missing-origin",
+				Kind: agent.RequirementKindApproval,
+			},
+		},
+	})
+	loop, err := agentreact.New(model, newRegistry(map[string]handler{}), events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("missing-origin"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      "conformance-model-missing-origin",
+		UserPrompt: "start",
+		MaxSteps:   3,
+	})
+	if !errors.Is(runErr, agent.ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusFailed {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared after invalid requirement failure")
+	}
+	if !strings.Contains(result.State.Error, "pending_requirement.origin") {
+		t.Fatalf("unexpected state error: %q", result.State.Error)
+	}
+	if countEventType(events.Events(), agent.EventTypeRunSuspended) != 0 {
+		t.Fatalf("unexpected run_suspended event for invalid model requirement")
+	}
+	if countEventType(events.Events(), agent.EventTypeRunFailed) != 1 {
+		t.Fatalf("expected single run_failed event")
+	}
+}
+
+func TestConformance_RunSuspendsWhenToolExecutorRequestsSuspension(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("conformance-tool-suspends-run")
+	events := newEventSink()
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "need tool input",
+				ToolCalls: []agent.ToolCall{
+					{
+						ID:   "call-1",
+						Name: "lookup",
+					},
+				},
+			},
+		},
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "completed after resolution",
+			},
+		},
+	)
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:     "req-tool-input",
+					Kind:   agent.RequirementKindUserInput,
+					Origin: agent.RequirementOriginTool,
+					Prompt: "provide tool input",
+				},
+			}
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-suspend"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      runID,
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement")
+	}
+	if result.State.PendingRequirement.ID != "req-tool-input" {
+		t.Fatalf("unexpected requirement id: %q", result.State.PendingRequirement.ID)
+	}
+	if result.State.PendingRequirement.Kind != agent.RequirementKindUserInput {
+		t.Fatalf("unexpected requirement kind: %s", result.State.PendingRequirement.Kind)
+	}
+	if result.State.PendingRequirement.Origin != agent.RequirementOriginTool {
+		t.Fatalf("unexpected requirement origin: %s", result.State.PendingRequirement.Origin)
+	}
+	if countEventType(events.Events(), agent.EventTypeRunSuspended) != 1 {
+		t.Fatalf("expected single run_suspended event")
+	}
+}
+
+func TestConformance_ToolSuspensionEmitsSuspendedToolResult(t *testing.T) {
+	t.Parallel()
+
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "need tool input",
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-1",
+					Name: "lookup",
+				},
+			},
+		},
+	})
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:     "req-tool-input",
+					Kind:   agent.RequirementKindUserInput,
+					Origin: agent.RequirementOriginTool,
+				},
+			}
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-result-suspended"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      "conformance-suspended-tool-result",
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+
+	var toolResultEvent *agent.Event
+	for i := range events.Events() {
+		current := events.Events()[i]
+		if current.Type == agent.EventTypeToolResult {
+			toolResultEvent = &current
+			break
+		}
+	}
+	if toolResultEvent == nil || toolResultEvent.ToolResult == nil {
+		t.Fatalf("expected tool_result event")
+	}
+	if !toolResultEvent.ToolResult.IsError {
+		t.Fatalf("tool result must be marked error")
+	}
+	if toolResultEvent.ToolResult.FailureReason != agent.ToolFailureReasonSuspended {
+		t.Fatalf("unexpected failure reason: %s", toolResultEvent.ToolResult.FailureReason)
+	}
+	if !strings.Contains(toolResultEvent.ToolResult.Content, string(agent.ToolFailureReasonSuspended)) {
+		t.Fatalf("unexpected tool result content: %q", toolResultEvent.ToolResult.Content)
+	}
+
+	if len(result.State.Messages) < 3 {
+		t.Fatalf("expected tool result message in transcript")
+	}
+	last := result.State.Messages[len(result.State.Messages)-1]
+	if last.Role != agent.RoleTool {
+		t.Fatalf("unexpected last transcript role: %s", last.Role)
+	}
+	if !strings.Contains(last.Content, string(agent.ToolFailureReasonSuspended)) {
+		t.Fatalf("unexpected transcript tool content: %q", last.Content)
+	}
+}
+
+func TestConformance_ToolSuspensionStopsRemainingToolCalls(t *testing.T) {
+	t.Parallel()
+
+	var firstCalls atomic.Int32
+	var secondCalls atomic.Int32
+
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "issue two tool calls",
+			ToolCalls: []agent.ToolCall{
+				{ID: "call-suspend", Name: "suspender"},
+				{ID: "call-second", Name: "secondary"},
+			},
+		},
+	})
+	registry := newRegistry(map[string]handler{
+		"suspender": func(_ context.Context, _ map[string]any) (string, error) {
+			firstCalls.Add(1)
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:     "req-stop",
+					Kind:   agent.RequirementKindApproval,
+					Origin: agent.RequirementOriginTool,
+				},
+			}
+		},
+		"secondary": func(_ context.Context, _ map[string]any) (string, error) {
+			secondCalls.Add(1)
+			return "unexpected", nil
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-stop"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      "conformance-tool-stop-remaining",
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "suspender"},
+			{Name: "secondary"},
+		},
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if firstCalls.Load() != 1 {
+		t.Fatalf("unexpected suspender call count: %d", firstCalls.Load())
+	}
+	if secondCalls.Load() != 0 {
+		t.Fatalf("unexpected secondary call count: %d", secondCalls.Load())
+	}
+	if countEventType(events.Events(), agent.EventTypeToolResult) != 1 {
+		t.Fatalf("expected one tool_result event")
+	}
+}
+
+func TestConformance_ToolSuspensionEventOrdering(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("conformance-tool-suspension-ordering")
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "needs tool input",
+			ToolCalls: []agent.ToolCall{
+				{ID: "call-1", Name: "lookup"},
+			},
+		},
+	})
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:     "req-tool-order",
+					Kind:   agent.RequirementKindUserInput,
+					Origin: agent.RequirementOriginTool,
+				},
+			}
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-order"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      runID,
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+
+	got := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeToolResult,
+		agent.EventTypeRunSuspended,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	wantSteps := []int{0, 1, 1, 1, 1, 1}
+	if len(got) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(got), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if got[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, got[i].Type, wantTypes[i])
+		}
+		if got[i].Step != wantSteps[i] {
+			t.Fatalf("event[%d] step mismatch: got=%d want=%d", i, got[i].Step, wantSteps[i])
+		}
+		if got[i].RunID != runID {
+			t.Fatalf("event[%d] run id mismatch: got=%s want=%s", i, got[i].RunID, runID)
+		}
+	}
+	if got[5].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected command kind: got=%s want=%s", got[5].CommandKind, agent.CommandKindStart)
+	}
+	if got[2].ToolResult == nil || got[2].ToolResult.FailureReason != agent.ToolFailureReasonSuspended {
+		t.Fatalf("unexpected tool result payload in ordering test")
+	}
+}
+
+func TestConformance_ContinueFromToolSuspensionRequiresResolution(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("conformance-tool-suspension-continue-requires-resolution")
+	store := newRunStore()
+	events := newEventSink()
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "need tool input",
+				ToolCalls: []agent.ToolCall{
+					{ID: "call-1", Name: "lookup"},
+				},
+			},
+		},
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "should not be reached",
+			},
+		},
+	)
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:     "req-tool-continue",
+					Kind:   agent.RequirementKindUserInput,
+					Origin: agent.RequirementOriginTool,
+				},
+			}
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-continue-required"),
+		RunStore:    store,
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	runResult, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      runID,
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if runResult.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected status: %s", runResult.State.Status)
+	}
+	persistedBeforeContinue, err := store.Load(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("load before continue: %v", err)
+	}
+	eventCountBeforeContinue := len(events.Events())
+
+	continueResult, continueErr := runner.Dispatch(context.Background(), agent.ContinueCommand{
+		RunID:    runID,
+		MaxSteps: 3,
+	})
+	if !errors.Is(continueErr, agent.ErrResolutionRequired) {
+		t.Fatalf("expected ErrResolutionRequired, got %v", continueErr)
+	}
+	if !reflect.DeepEqual(continueResult.State, persistedBeforeContinue) {
+		t.Fatalf("continue mutated state on resolution-required rejection")
+	}
+	if len(events.Events()) != eventCountBeforeContinue {
+		t.Fatalf("unexpected events emitted on resolution-required rejection")
+	}
+}
+
+func TestConformance_ContinueFromToolSuspensionWithMatchingResolution(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("conformance-tool-suspension-continue-success")
+	store := newRunStore()
+	events := newEventSink()
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "need tool input",
+				ToolCalls: []agent.ToolCall{
+					{ID: "call-1", Name: "lookup"},
+				},
+			},
+		},
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "completed after tool resolution",
+			},
+		},
+	)
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:     "req-tool-continue",
+					Kind:   agent.RequirementKindUserInput,
+					Origin: agent.RequirementOriginTool,
+				},
+			}
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-continue-success"),
+		RunStore:    store,
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	runResult, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      runID,
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if runResult.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected status: %s", runResult.State.Status)
+	}
+	prefix := agent.CloneMessages(runResult.State.Messages)
+
+	continueResult, continueErr := runner.Dispatch(context.Background(), agent.ContinueCommand{
+		RunID:    runID,
+		MaxSteps: 3,
+		Resolution: &agent.Resolution{
+			RequirementID: "req-tool-continue",
+			Kind:          agent.RequirementKindUserInput,
+			Outcome:       agent.ResolutionOutcomeProvided,
+			Value:         "input provided",
+		},
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if continueErr != nil {
+		t.Fatalf("continue returned error: %v", continueErr)
+	}
+	if continueResult.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected continue status: %s", continueResult.State.Status)
+	}
+	if continueResult.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared after continue")
+	}
+	if len(continueResult.State.Messages) <= len(prefix) {
+		t.Fatalf("expected transcript growth after continue")
+	}
+	if !reflect.DeepEqual(continueResult.State.Messages[:len(prefix)], prefix) {
+		t.Fatalf("continue mutated transcript prefix")
+	}
+
+	gotEvents := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeToolResult,
+		agent.EventTypeRunSuspended,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	if len(gotEvents) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(gotEvents), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if gotEvents[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, gotEvents[i].Type, wantTypes[i])
+		}
+	}
+	if gotEvents[5].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected start command kind: got=%s want=%s", gotEvents[5].CommandKind, agent.CommandKindStart)
+	}
+	if gotEvents[9].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected continue command kind: got=%s want=%s", gotEvents[9].CommandKind, agent.CommandKindContinue)
+	}
+}
+
+func TestConformance_ToolSuspensionInvalidRequirementFailsRun(t *testing.T) {
+	t.Parallel()
+
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "need tool input",
+			ToolCalls: []agent.ToolCall{
+				{ID: "call-1", Name: "lookup"},
+			},
+		},
+	})
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:   "req-invalid",
+					Kind: agent.RequirementKindApproval,
+				},
+			}
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-invalid-requirement"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      "conformance-tool-invalid-requirement",
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if !errors.Is(runErr, agent.ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusFailed {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared on invalid tool suspension failure")
+	}
+	if !strings.Contains(result.State.Error, "pending_requirement.origin") {
+		t.Fatalf("unexpected state error: %q", result.State.Error)
+	}
+	if countEventType(events.Events(), agent.EventTypeToolResult) != 1 {
+		t.Fatalf("expected one tool_result event before failure")
+	}
+	if countEventType(events.Events(), agent.EventTypeRunFailed) != 1 {
+		t.Fatalf("expected one run_failed event")
+	}
+	if countEventType(events.Events(), agent.EventTypeRunSuspended) != 0 {
+		t.Fatalf("unexpected run_suspended event for invalid requirement")
+	}
+}
+
+func countEventType(events []agent.Event, want agent.EventType) int {
+	count := 0
+	for _, event := range events {
+		if event.Type == want {
+			count++
+		}
+	}
+	return count
 }
