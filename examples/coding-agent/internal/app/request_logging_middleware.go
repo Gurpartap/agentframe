@@ -60,6 +60,12 @@ func (w *statusCapturingWriter) statusCode() int {
 	return w.status
 }
 
+func (w *statusCapturingWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 func runIDFromPath(path string) string {
 	trimmed := strings.Trim(path, "/")
 	if trimmed == "" {

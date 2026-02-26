@@ -66,9 +66,51 @@ func TestRequestLoggingMiddleware_StartRouteOmitsRunID(t *testing.T) {
 	}
 }
 
+func TestStatusCapturingWriter_FlushDelegates(t *testing.T) {
+	t.Parallel()
+
+	base := &flushWriter{header: make(http.Header)}
+	writer := &statusCapturingWriter{ResponseWriter: base}
+
+	flusher, ok := any(writer).(http.Flusher)
+	if !ok {
+		t.Fatalf("statusCapturingWriter must implement http.Flusher")
+	}
+
+	flusher.Flush()
+	if base.flushCount != 1 {
+		t.Fatalf("flush count mismatch: got=%d want=%d", base.flushCount, 1)
+	}
+}
+
 func assertLogContains(t *testing.T, line, want string) {
 	t.Helper()
 	if !strings.Contains(line, want) {
 		t.Fatalf("log line missing %q: %s", want, line)
 	}
+}
+
+type flushWriter struct {
+	header     http.Header
+	statusCode int
+	flushCount int
+}
+
+func (w *flushWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *flushWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+}
+
+func (w *flushWriter) Write(p []byte) (int, error) {
+	if w.statusCode == 0 {
+		w.statusCode = http.StatusOK
+	}
+	return len(p), nil
+}
+
+func (w *flushWriter) Flush() {
+	w.flushCount++
 }
