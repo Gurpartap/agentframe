@@ -132,7 +132,10 @@ func TestRepeatedContinueDeterminism(t *testing.T) {
 func newRuntime(t *testing.T) *runtimewire.Runtime {
 	t.Helper()
 
-	rt, err := runtimewire.New(config.Default())
+	cfg := config.Default()
+	cfg.ToolMode = config.ToolModeMock
+
+	rt, err := runtimewire.New(cfg)
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}

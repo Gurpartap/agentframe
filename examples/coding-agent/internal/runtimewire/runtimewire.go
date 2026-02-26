@@ -16,6 +16,7 @@ import (
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/modelopenai"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runstream"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runtimewire/mocks"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/toolset"
 )
 
 // Runtime contains the composed runtime dependencies for the server.
@@ -41,7 +42,10 @@ func New(cfg config.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new runtime model: %w", err)
 	}
-	tools := mocks.NewTools()
+	tools, toolDefinitions, err := buildTools(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("new runtime tools: %w", err)
+	}
 	loop, err := agentreact.New(model, tools, fanout)
 	if err != nil {
 		return nil, fmt.Errorf("new runtime loop: %w", err)
@@ -62,7 +66,7 @@ func New(cfg config.Config) (*Runtime, error) {
 		RunStore:        store,
 		EventSink:       events,
 		StreamBroker:    streamBroker,
-		ToolDefinitions: mocks.Definitions(),
+		ToolDefinitions: toolDefinitions,
 	}, nil
 }
 
@@ -84,6 +88,21 @@ func buildModel(cfg config.Config) (agentreact.Model, error) {
 		return providerModel, nil
 	default:
 		return nil, fmt.Errorf("unsupported model mode %q", cfg.ModelMode)
+	}
+}
+
+func buildTools(cfg config.Config) (agentreact.ToolExecutor, []agent.ToolDefinition, error) {
+	switch cfg.ToolMode {
+	case config.ToolModeMock:
+		return mocks.NewTools(), mocks.Definitions(), nil
+	case config.ToolModeReal:
+		policy, err := toolset.NewPolicy(cfg.WorkspaceRoot, cfg.BashTimeout)
+		if err != nil {
+			return nil, nil, err
+		}
+		return toolset.NewExecutor(policy), toolset.Definitions(), nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported tool mode %q", cfg.ToolMode)
 	}
 }
 

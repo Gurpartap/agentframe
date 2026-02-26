@@ -15,6 +15,8 @@ const (
 	defaultProviderBaseURL = "https://api.openai.com/v1"
 	defaultProviderModel   = "gpt-4.1-mini"
 	defaultProviderTimeout = 30 * time.Second
+	defaultToolMode        = ToolModeReal
+	defaultBashTimeout     = 3 * time.Second
 )
 
 type ModelMode string
@@ -22,6 +24,13 @@ type ModelMode string
 const (
 	ModelModeMock     ModelMode = "mock"
 	ModelModeProvider ModelMode = "provider"
+)
+
+type ToolMode string
+
+const (
+	ToolModeMock ToolMode = "mock"
+	ToolModeReal ToolMode = "real"
 )
 
 // Config controls HTTP boot and shutdown behavior.
@@ -33,6 +42,9 @@ type Config struct {
 	ProviderModel   string
 	ProviderBaseURL string
 	ProviderTimeout time.Duration
+	ToolMode        ToolMode
+	WorkspaceRoot   string
+	BashTimeout     time.Duration
 }
 
 // Load reads runtime configuration from environment variables.
@@ -76,6 +88,22 @@ func Load() (Config, error) {
 		}
 		cfg.ProviderTimeout = parsed
 	}
+	if mode := strings.TrimSpace(os.Getenv("CODING_AGENT_TOOL_MODE")); mode != "" {
+		cfg.ToolMode = ToolMode(mode)
+	}
+	if root := strings.TrimSpace(os.Getenv("CODING_AGENT_WORKSPACE_ROOT")); root != "" {
+		cfg.WorkspaceRoot = root
+	}
+	if timeout := strings.TrimSpace(os.Getenv("CODING_AGENT_BASH_TIMEOUT")); timeout != "" {
+		parsed, err := time.ParseDuration(timeout)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse CODING_AGENT_BASH_TIMEOUT: %w", err)
+		}
+		if parsed <= 0 {
+			return Config{}, fmt.Errorf("parse CODING_AGENT_BASH_TIMEOUT: value must be > 0")
+		}
+		cfg.BashTimeout = parsed
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -85,6 +113,11 @@ func Load() (Config, error) {
 }
 
 func Default() Config {
+	workspaceRoot, err := os.Getwd()
+	if err != nil || strings.TrimSpace(workspaceRoot) == "" {
+		workspaceRoot = "."
+	}
+
 	return Config{
 		HTTPAddr:        defaultHTTPAddr,
 		ShutdownTimeout: defaultShutdownTimeout,
@@ -92,13 +125,15 @@ func Default() Config {
 		ProviderModel:   defaultProviderModel,
 		ProviderBaseURL: defaultProviderBaseURL,
 		ProviderTimeout: defaultProviderTimeout,
+		ToolMode:        defaultToolMode,
+		WorkspaceRoot:   workspaceRoot,
+		BashTimeout:     defaultBashTimeout,
 	}
 }
 
 func (c Config) Validate() error {
 	switch c.ModelMode {
 	case ModelModeMock:
-		return nil
 	case ModelModeProvider:
 		if strings.TrimSpace(c.ProviderAPIKey) == "" {
 			return errors.New("validate config: provider mode requires CODING_AGENT_PROVIDER_API_KEY")
@@ -112,7 +147,6 @@ func (c Config) Validate() error {
 		if c.ProviderTimeout <= 0 {
 			return errors.New("validate config: provider mode requires CODING_AGENT_PROVIDER_TIMEOUT > 0")
 		}
-		return nil
 	default:
 		return fmt.Errorf(
 			"validate config: unsupported CODING_AGENT_MODEL_MODE %q (allowed: %q, %q)",
@@ -121,4 +155,24 @@ func (c Config) Validate() error {
 			ModelModeProvider,
 		)
 	}
+
+	switch c.ToolMode {
+	case ToolModeMock:
+	case ToolModeReal:
+		if strings.TrimSpace(c.WorkspaceRoot) == "" {
+			return errors.New("validate config: real tool mode requires CODING_AGENT_WORKSPACE_ROOT")
+		}
+		if c.BashTimeout <= 0 {
+			return errors.New("validate config: real tool mode requires CODING_AGENT_BASH_TIMEOUT > 0")
+		}
+	default:
+		return fmt.Errorf(
+			"validate config: unsupported CODING_AGENT_TOOL_MODE %q (allowed: %q, %q)",
+			c.ToolMode,
+			ToolModeMock,
+			ToolModeReal,
+		)
+	}
+
+	return nil
 }

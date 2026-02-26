@@ -15,6 +15,7 @@ func TestRuntimeDefaultUsesMockModel(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.ModelMode = config.ModelModeMock
+	cfg.ToolMode = config.ToolModeMock
 
 	runtime, err := runtimewire.New(cfg)
 	if err != nil {

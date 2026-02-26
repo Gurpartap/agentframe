@@ -19,6 +19,12 @@ func NewModel() *Model {
 
 func (m *Model) Generate(ctx context.Context, request agentreact.ModelRequest) (agent.Message, error) {
 	latestUser := latestUserMessage(request.Messages)
+	if strings.Contains(strings.ToLower(latestUser), "[e2e-coding-success]") {
+		return e2eCodingSuccessResponse(request.Messages), nil
+	}
+	if strings.Contains(strings.ToLower(latestUser), "[e2e-tool-error]") {
+		return e2eToolErrorResponse(request.Messages), nil
+	}
 	if request.Resolution == nil && strings.Contains(strings.ToLower(latestUser), "[suspend]") {
 		return agent.Message{
 			Role: agent.RoleAssistant,
@@ -78,4 +84,103 @@ func latestUserMessage(messages []agent.Message) string {
 		}
 	}
 	return latestUser
+}
+
+func e2eCodingSuccessResponse(messages []agent.Message) agent.Message {
+	switch {
+	case !hasToolResult(messages, "write"):
+		return agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-write-1",
+					Name: "write",
+					Arguments: map[string]any{
+						"path":    "notes.txt",
+						"content": "hello toolset\n",
+					},
+				},
+			},
+		}
+	case !hasToolResult(messages, "read"):
+		return agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-read-1",
+					Name: "read",
+					Arguments: map[string]any{
+						"path": "notes.txt",
+					},
+				},
+			},
+		}
+	case !hasToolResult(messages, "edit"):
+		return agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-edit-1",
+					Name: "edit",
+					Arguments: map[string]any{
+						"path": "notes.txt",
+						"old":  "hello toolset",
+						"new":  "hello real tools",
+					},
+				},
+			},
+		}
+	case !hasToolResult(messages, "bash"):
+		return agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-bash-1",
+					Name: "bash",
+					Arguments: map[string]any{
+						"command": "cat notes.txt",
+					},
+				},
+			},
+		}
+	default:
+		return agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "coding flow success",
+		}
+	}
+}
+
+func e2eToolErrorResponse(messages []agent.Message) agent.Message {
+	if !hasToolResult(messages, "read") {
+		return agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-read-error-1",
+					Name: "read",
+					Arguments: map[string]any{
+						"path": "../outside.txt",
+					},
+				},
+			},
+		}
+	}
+
+	return agent.Message{
+		Role:    agent.RoleAssistant,
+		Content: "tool error path complete",
+	}
+}
+
+func hasToolResult(messages []agent.Message, toolName string) bool {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != agent.RoleTool {
+			continue
+		}
+		if messages[i].Name == toolName {
+			return true
+		}
+	}
+	return false
 }

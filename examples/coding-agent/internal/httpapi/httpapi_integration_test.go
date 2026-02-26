@@ -397,6 +397,7 @@ func newTestServerWithPolicy(t *testing.T, policy httpapi.PolicyConfig) *httptes
 
 	cfg := config.Default()
 	cfg.ModelMode = config.ModelModeMock
+	cfg.ToolMode = config.ToolModeMock
 
 	runtime, err := runtimewire.New(cfg)
 	if err != nil {
