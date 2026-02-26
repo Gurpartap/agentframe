@@ -387,6 +387,14 @@ func writeRunState(out io.Writer, state api.RunState) error {
 		if _, err := fmt.Fprintf(out, "pending_requirement.kind: %s\n", state.PendingRequirement.Kind); err != nil {
 			return err
 		}
+		if _, err := fmt.Fprintf(out, "pending_requirement.origin: %s\n", state.PendingRequirement.Origin); err != nil {
+			return err
+		}
+		if state.PendingRequirement.ToolCallID != "" {
+			if _, err := fmt.Fprintf(out, "pending_requirement.tool_call_id: %s\n", state.PendingRequirement.ToolCallID); err != nil {
+				return err
+			}
+		}
 		if state.PendingRequirement.Prompt != "" {
 			if _, err := fmt.Fprintf(out, "pending_requirement.prompt: %s\n", state.PendingRequirement.Prompt); err != nil {
 				return err

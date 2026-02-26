@@ -333,3 +333,39 @@ func TestExecuteContinueRejectsUnsupportedResolutionOutcome(t *testing.T) {
 		t.Fatalf("expected unsupported outcome message, got %q", err.Error())
 	}
 }
+
+func TestExecutePrintsPendingRequirementOriginAndToolCallID(t *testing.T) {
+	t.Parallel()
+
+	responseJSON := `{"run_id":"run-suspended","status":"suspended","step":1,"version":2,"pending_requirement":{"id":"req-tool","kind":"approval","origin":"tool","tool_call_id":"call-bash-1","prompt":"approve"}}` + "\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/runs/run-suspended" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, responseJSON)
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := Execute(
+		context.Background(),
+		[]string{"--base-url", server.URL, "get", "run-suspended"},
+		&stdout,
+		&stderr,
+	)
+	if err != nil {
+		t.Fatalf("execute: %v stderr=%s", err, stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "pending_requirement.origin: tool") {
+		t.Fatalf("missing pending requirement origin in output: %q", output)
+	}
+	if !strings.Contains(output, "pending_requirement.tool_call_id: call-bash-1") {
+		t.Fatalf("missing pending requirement tool_call_id in output: %q", output)
+	}
+}

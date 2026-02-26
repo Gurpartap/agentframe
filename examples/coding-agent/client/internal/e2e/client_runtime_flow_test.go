@@ -97,6 +97,16 @@ func TestClientSuspendedResolutionContinueFlow(t *testing.T) {
 	if started.PendingRequirement == nil {
 		t.Fatalf("expected pending requirement in suspended run")
 	}
+	if started.PendingRequirement.Origin != string(agent.RequirementOriginModel) {
+		t.Fatalf(
+			"pending requirement origin mismatch: got=%q want=%q",
+			started.PendingRequirement.Origin,
+			agent.RequirementOriginModel,
+		)
+	}
+	if started.PendingRequirement.ToolCallID != "" {
+		t.Fatalf("expected empty pending requirement tool_call_id for model-origin suspension, got=%q", started.PendingRequirement.ToolCallID)
+	}
 
 	_, _, err = apiClient.Continue(context.Background(), started.RunID, api.ContinueRequest{
 		MaxSteps: intPtr(2),

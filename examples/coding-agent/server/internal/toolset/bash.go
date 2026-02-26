@@ -7,14 +7,28 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/Gurpartap/agentframe/agent"
 )
 
-func (e *Executor) executeBash(ctx context.Context, arguments map[string]any) (string, error) {
-	command, err := stringArgument(arguments, "command")
+func (e *Executor) executeBash(ctx context.Context, call agent.ToolCall) (string, error) {
+	command, err := stringArgument(call.Arguments, "command")
 	if err != nil {
 		return "", err
 	}
 	if err := e.policy.ValidateBashCommand(command); err != nil {
+		if errors.Is(err, ErrBashCommandDenied) {
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:         fmt.Sprintf("req-bash-policy-%s", call.ID),
+					Kind:       agent.RequirementKindApproval,
+					Origin:     agent.RequirementOriginTool,
+					ToolCallID: call.ID,
+					Prompt:     "approve bash command denied by policy",
+				},
+				Err: err,
+			}
+		}
 		return "", err
 	}
 

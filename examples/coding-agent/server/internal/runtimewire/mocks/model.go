@@ -31,7 +31,22 @@ func (m *Model) Generate(ctx context.Context, request agentreact.ModelRequest) (
 			Requirement: &agent.PendingRequirement{
 				ID:     "req-approval",
 				Kind:   agent.RequirementKindApproval,
+				Origin: agent.RequirementOriginModel,
 				Prompt: "approve deterministic continuation",
+			},
+		}, nil
+	}
+	if strings.Contains(strings.ToLower(latestUser), "[e2e-bash-policy-denied]") {
+		return agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-bash-denied-1",
+					Name: "bash",
+					Arguments: map[string]any{
+						"command": "ls; pwd",
+					},
+				},
 			},
 		}, nil
 	}

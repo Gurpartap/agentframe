@@ -236,7 +236,7 @@ func (e *Executor) Execute(ctx context.Context, call agent.ToolCall) (agent.Tool
 	case ToolEdit:
 		content, err = e.executeEdit(call.Arguments)
 	case ToolBash:
-		content, err = e.executeBash(ctx, call.Arguments)
+		content, err = e.executeBash(ctx, call)
 	default:
 		return agent.ToolResult{}, fmt.Errorf("toolset: unsupported tool %q", call.Name)
 	}

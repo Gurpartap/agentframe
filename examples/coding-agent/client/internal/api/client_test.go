@@ -80,6 +80,41 @@ func TestClientStartAndGet(t *testing.T) {
 	}
 }
 
+func TestClientParsesPendingRequirementOriginAndToolCallID(t *testing.T) {
+	t.Parallel()
+
+	const responseJSON = `{"run_id":"run-suspended","status":"suspended","step":1,"version":2,"pending_requirement":{"id":"req-tool","kind":"approval","origin":"tool","tool_call_id":"call-bash-1","prompt":"approve"}}` + "\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/runs/run-suspended" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, responseJSON)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "token", server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	state, _, err := client.Get(context.Background(), "run-suspended")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if state.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement")
+	}
+	if state.PendingRequirement.Origin != "tool" {
+		t.Fatalf("pending requirement origin mismatch: got=%q want=%q", state.PendingRequirement.Origin, "tool")
+	}
+	if state.PendingRequirement.ToolCallID != "call-bash-1" {
+		t.Fatalf("pending requirement tool_call_id mismatch: got=%q want=%q", state.PendingRequirement.ToolCallID, "call-bash-1")
+	}
+}
+
 func TestClientMapsErrorShape(t *testing.T) {
 	t.Parallel()
 

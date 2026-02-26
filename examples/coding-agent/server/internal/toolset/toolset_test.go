@@ -128,6 +128,25 @@ func TestExecutorBashPolicyRejectsForbiddenToken(t *testing.T) {
 			"command": "ls; pwd",
 		},
 	})
+	var suspendErr *agent.SuspendRequestError
+	if !errors.As(err, &suspendErr) {
+		t.Fatalf("expected SuspendRequestError, got %T (%v)", err, err)
+	}
+	if suspendErr.Requirement == nil {
+		t.Fatalf("expected suspend requirement payload")
+	}
+	if suspendErr.Requirement.ID != "req-bash-policy-bash-denied-1" {
+		t.Fatalf("requirement id mismatch: got=%q want=%q", suspendErr.Requirement.ID, "req-bash-policy-bash-denied-1")
+	}
+	if suspendErr.Requirement.Kind != agent.RequirementKindApproval {
+		t.Fatalf("requirement kind mismatch: got=%s want=%s", suspendErr.Requirement.Kind, agent.RequirementKindApproval)
+	}
+	if suspendErr.Requirement.Origin != agent.RequirementOriginTool {
+		t.Fatalf("requirement origin mismatch: got=%s want=%s", suspendErr.Requirement.Origin, agent.RequirementOriginTool)
+	}
+	if suspendErr.Requirement.ToolCallID != "bash-denied-1" {
+		t.Fatalf("requirement tool_call_id mismatch: got=%q want=%q", suspendErr.Requirement.ToolCallID, "bash-denied-1")
+	}
 	if !errors.Is(err, toolset.ErrBashCommandDenied) {
 		t.Fatalf("expected ErrBashCommandDenied, got %v", err)
 	}

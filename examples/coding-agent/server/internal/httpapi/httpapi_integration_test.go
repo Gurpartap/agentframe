@@ -28,9 +28,11 @@ type runStateResponse struct {
 	Output             string `json:"output"`
 	Error              string `json:"error"`
 	PendingRequirement *struct {
-		ID     string `json:"id"`
-		Kind   string `json:"kind"`
-		Prompt string `json:"prompt"`
+		ID         string `json:"id"`
+		Kind       string `json:"kind"`
+		Origin     string `json:"origin"`
+		ToolCallID string `json:"tool_call_id,omitempty"`
+		Prompt     string `json:"prompt"`
 	} `json:"pending_requirement,omitempty"`
 }
 
@@ -122,6 +124,16 @@ func TestRunContinueResolutionGating(t *testing.T) {
 	if started.PendingRequirement == nil {
 		t.Fatalf("expected pending requirement for suspended run")
 	}
+	if started.PendingRequirement.Origin != string(agent.RequirementOriginModel) {
+		t.Fatalf(
+			"pending requirement origin mismatch: got=%q want=%q",
+			started.PendingRequirement.Origin,
+			agent.RequirementOriginModel,
+		)
+	}
+	if started.PendingRequirement.ToolCallID != "" {
+		t.Fatalf("expected empty tool_call_id for model-origin requirement, got=%q", started.PendingRequirement.ToolCallID)
+	}
 
 	continueURL := server.URL + "/v1/runs/" + started.RunID + "/continue"
 
@@ -166,6 +178,68 @@ func TestRunContinueResolutionGating(t *testing.T) {
 	}
 	if continued.Status != string(agent.RunStatusCompleted) {
 		t.Fatalf("continue valid status mismatch: got=%s want=%s", continued.Status, agent.RunStatusCompleted)
+	}
+}
+
+func TestRunStartBashPolicyDeniedSuspendsWithToolOriginRequirement(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRuntimeConfig(
+		t,
+		httpapi.PolicyConfig{
+			AuthToken:           testAuthToken,
+			MaxRequestBodyBytes: 4 << 10,
+			RequestTimeout:      2 * time.Second,
+			MaxCommandSteps:     policylimit.DefaultMaxCommandSteps,
+		},
+		func(cfg *config.Config) {
+			cfg.ModelMode = config.ModelModeMock
+			cfg.ToolMode = config.ToolModeReal
+			cfg.WorkspaceRoot = t.TempDir()
+		},
+	)
+	defer server.Close()
+
+	var started runStateResponse
+	status := performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"user_prompt": "[e2e-bash-policy-denied]",
+		"max_steps":   4,
+	}, &started)
+	if status != http.StatusOK {
+		t.Fatalf("start status mismatch: got=%d want=%d", status, http.StatusOK)
+	}
+	if started.Status != string(agent.RunStatusSuspended) {
+		t.Fatalf("expected suspended start status, got=%s", started.Status)
+	}
+	if started.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement for suspended run")
+	}
+	if started.PendingRequirement.Kind != string(agent.RequirementKindApproval) {
+		t.Fatalf("pending requirement kind mismatch: got=%q want=%q", started.PendingRequirement.Kind, agent.RequirementKindApproval)
+	}
+	if started.PendingRequirement.Origin != string(agent.RequirementOriginTool) {
+		t.Fatalf(
+			"pending requirement origin mismatch: got=%q want=%q",
+			started.PendingRequirement.Origin,
+			agent.RequirementOriginTool,
+		)
+	}
+	if started.PendingRequirement.ToolCallID != "call-bash-denied-1" {
+		t.Fatalf(
+			"pending requirement tool_call_id mismatch: got=%q want=%q",
+			started.PendingRequirement.ToolCallID,
+			"call-bash-denied-1",
+		)
+	}
+	if started.PendingRequirement.ID != "req-bash-policy-call-bash-denied-1" {
+		t.Fatalf(
+			"pending requirement id mismatch: got=%q want=%q",
+			started.PendingRequirement.ID,
+			"req-bash-policy-call-bash-denied-1",
+		)
+	}
+	if started.PendingRequirement.Prompt == "" {
+		t.Fatalf("expected pending requirement prompt")
 	}
 }
 
@@ -384,20 +458,32 @@ func TestCancellationAndConflictDeterminism(t *testing.T) {
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	return newTestServerWithPolicy(t, httpapi.PolicyConfig{
+	return newTestServerWithRuntimeConfig(t, httpapi.PolicyConfig{
 		AuthToken:           testAuthToken,
 		MaxRequestBodyBytes: 4 << 10,
 		RequestTimeout:      2 * time.Second,
 		MaxCommandSteps:     policylimit.DefaultMaxCommandSteps,
-	})
+	}, nil)
 }
 
 func newTestServerWithPolicy(t *testing.T, policy httpapi.PolicyConfig) *httptest.Server {
+	t.Helper()
+	return newTestServerWithRuntimeConfig(t, policy, nil)
+}
+
+func newTestServerWithRuntimeConfig(
+	t *testing.T,
+	policy httpapi.PolicyConfig,
+	configure func(*config.Config),
+) *httptest.Server {
 	t.Helper()
 
 	cfg := config.Default()
 	cfg.ModelMode = config.ModelModeMock
 	cfg.ToolMode = config.ToolModeMock
+	if configure != nil {
+		configure(&cfg)
+	}
 
 	runtime, err := runtimewire.New(cfg)
 	if err != nil {

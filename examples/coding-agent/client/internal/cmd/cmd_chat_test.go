@@ -159,9 +159,11 @@ func TestExecuteChatSuspendedResolutionFlow(t *testing.T) {
 		Version            int64  `json:"version"`
 		Output             string `json:"output,omitempty"`
 		PendingRequirement *struct {
-			ID     string `json:"id"`
-			Kind   string `json:"kind"`
-			Prompt string `json:"prompt"`
+			ID         string `json:"id"`
+			Kind       string `json:"kind"`
+			Origin     string `json:"origin"`
+			ToolCallID string `json:"tool_call_id,omitempty"`
+			Prompt     string `json:"prompt"`
 		} `json:"pending_requirement,omitempty"`
 	}
 
@@ -185,13 +187,17 @@ func TestExecuteChatSuspendedResolutionFlow(t *testing.T) {
 				Step:    1,
 				Version: 2,
 				PendingRequirement: &struct {
-					ID     string `json:"id"`
-					Kind   string `json:"kind"`
-					Prompt string `json:"prompt"`
+					ID         string `json:"id"`
+					Kind       string `json:"kind"`
+					Origin     string `json:"origin"`
+					ToolCallID string `json:"tool_call_id,omitempty"`
+					Prompt     string `json:"prompt"`
 				}{
-					ID:     "req-approval",
-					Kind:   "approval",
-					Prompt: "approve deterministic continuation",
+					ID:         "req-approval",
+					Kind:       "approval",
+					Origin:     "tool",
+					ToolCallID: "call-bash-1",
+					Prompt:     "approve deterministic continuation",
 				},
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run-suspended":
@@ -201,13 +207,17 @@ func TestExecuteChatSuspendedResolutionFlow(t *testing.T) {
 				Step:    1,
 				Version: 2,
 				PendingRequirement: &struct {
-					ID     string `json:"id"`
-					Kind   string `json:"kind"`
-					Prompt string `json:"prompt"`
+					ID         string `json:"id"`
+					Kind       string `json:"kind"`
+					Origin     string `json:"origin"`
+					ToolCallID string `json:"tool_call_id,omitempty"`
+					Prompt     string `json:"prompt"`
 				}{
-					ID:     "req-approval",
-					Kind:   "approval",
-					Prompt: "approve deterministic continuation",
+					ID:         "req-approval",
+					Kind:       "approval",
+					Origin:     "tool",
+					ToolCallID: "call-bash-1",
+					Prompt:     "approve deterministic continuation",
 				},
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run-suspended/events":
@@ -290,6 +300,12 @@ func TestExecuteChatSuspendedResolutionFlow(t *testing.T) {
 	}
 	if !strings.Contains(output, "requirement_id [req-approval]:") {
 		t.Fatalf("missing requirement prompt output: %q", output)
+	}
+	if !strings.Contains(output, "pending_requirement.origin: tool") {
+		t.Fatalf("missing pending requirement origin output: %q", output)
+	}
+	if !strings.Contains(output, "pending_requirement.tool_call_id: call-bash-1") {
+		t.Fatalf("missing pending requirement tool_call_id output: %q", output)
 	}
 }
 
