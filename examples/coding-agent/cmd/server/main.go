@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	bootstrapLogger := newServerLogger(serverLogOutput, slog.LevelInfo)
+	bootstrapLogger := newServerLogger(serverLogOutput, slog.LevelInfo, config.LogFormatText)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -20,7 +20,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := newServerLogger(serverLogOutput, cfg.LogLevel)
+	logger := newServerLogger(serverLogOutput, cfg.LogLevel, cfg.LogFormat)
 
 	application, err := app.New(cfg, logger)
 	if err != nil {

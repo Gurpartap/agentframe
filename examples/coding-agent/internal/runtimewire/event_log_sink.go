@@ -6,17 +6,25 @@ import (
 	"log/slog"
 
 	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/config"
 )
 
 type runtimeEventLogSink struct {
-	logger *slog.Logger
+	logger    *slog.Logger
+	logFormat config.LogFormat
 }
 
-func newRuntimeEventLogSink(logger *slog.Logger) agent.EventSink {
+func newRuntimeEventLogSink(logger *slog.Logger, logFormat config.LogFormat) agent.EventSink {
 	if logger == nil {
 		return nil
 	}
-	return runtimeEventLogSink{logger: logger}
+	if logFormat == "" {
+		logFormat = config.LogFormatText
+	}
+	return runtimeEventLogSink{
+		logger:    logger,
+		logFormat: logFormat,
+	}
 }
 
 func (s runtimeEventLogSink) Publish(ctx context.Context, event agent.Event) error {
@@ -27,9 +35,14 @@ func (s runtimeEventLogSink) Publish(ctx context.Context, event agent.Event) err
 		return ctxErr
 	}
 
-	eventPayload, err := json.Marshal(event)
-	if err != nil {
-		return err
+	if s.logFormat == config.LogFormatJSON {
+		s.logger.Debug("run event", slog.Any("event", event))
+		return nil
+	}
+
+	eventPayload, marshalErr := json.Marshal(event)
+	if marshalErr != nil {
+		return marshalErr
 	}
 
 	s.logger.Debug("run event", slog.String("event", string(eventPayload)))

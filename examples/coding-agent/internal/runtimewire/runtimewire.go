@@ -45,7 +45,7 @@ func newRuntime(cfg config.Config, logger *slog.Logger) (*Runtime, error) {
 	store := runstoreinmem.New()
 	events := eventinginmem.New()
 	streamBroker := runstream.New(runstream.DefaultHistoryLimit)
-	eventLogger := newRuntimeEventLogSink(logger)
+	eventLogger := newRuntimeEventLogSink(logger, cfg.LogFormat)
 	fanout := newFanoutSink(events, streamBroker, eventLogger)
 
 	model, err := buildModel(cfg)

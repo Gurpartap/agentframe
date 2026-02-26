@@ -12,6 +12,7 @@ import (
 const (
 	defaultHTTPAddr        = "127.0.0.1:8080"
 	defaultShutdownTimeout = 5 * time.Second
+	defaultLogFormat       = LogFormatText
 	defaultModelMode       = ModelModeMock
 	defaultProviderBaseURL = "https://api.openai.com/v1"
 	defaultProviderModel   = "gpt-4.1-mini"
@@ -35,10 +36,18 @@ const (
 	ToolModeReal ToolMode = "real"
 )
 
+type LogFormat string
+
+const (
+	LogFormatText LogFormat = "text"
+	LogFormatJSON LogFormat = "json"
+)
+
 // Config controls HTTP boot and shutdown behavior.
 type Config struct {
 	HTTPAddr        string
 	ShutdownTimeout time.Duration
+	LogFormat       LogFormat
 	LogLevel        slog.Level
 	ModelMode       ModelMode
 	ProviderAPIKey  string
@@ -74,6 +83,13 @@ func Load() (Config, error) {
 			return Config{}, err
 		}
 		cfg.LogLevel = parsed
+	}
+	if format := strings.TrimSpace(os.Getenv("CODING_AGENT_LOG_FORMAT")); format != "" {
+		parsed, err := parseLogFormat(format)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.LogFormat = parsed
 	}
 
 	if mode := strings.TrimSpace(os.Getenv("CODING_AGENT_MODEL_MODE")); mode != "" {
@@ -131,6 +147,7 @@ func Default() Config {
 	return Config{
 		HTTPAddr:        defaultHTTPAddr,
 		ShutdownTimeout: defaultShutdownTimeout,
+		LogFormat:       defaultLogFormat,
 		LogLevel:        defaultLogLevel,
 		ModelMode:       defaultModelMode,
 		ProviderModel:   defaultProviderModel,
@@ -198,6 +215,17 @@ func (c Config) Validate() error {
 		)
 	}
 
+	switch c.LogFormat {
+	case LogFormatText, LogFormatJSON:
+	default:
+		return fmt.Errorf(
+			"validate config: unsupported CODING_AGENT_LOG_FORMAT %q (allowed: %q, %q)",
+			c.LogFormat,
+			LogFormatText,
+			LogFormatJSON,
+		)
+	}
+
 	return nil
 }
 
@@ -219,6 +247,22 @@ func parseLogLevel(input string) (slog.Level, error) {
 			slog.LevelInfo.String(),
 			slog.LevelWarn.String(),
 			slog.LevelError.String(),
+		)
+	}
+}
+
+func parseLogFormat(input string) (LogFormat, error) {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case string(LogFormatText):
+		return LogFormatText, nil
+	case string(LogFormatJSON):
+		return LogFormatJSON, nil
+	default:
+		return "", fmt.Errorf(
+			"parse CODING_AGENT_LOG_FORMAT: unsupported value %q (allowed: %q, %q)",
+			input,
+			LogFormatText,
+			LogFormatJSON,
 		)
 	}
 }
