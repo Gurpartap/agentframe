@@ -1027,6 +1027,60 @@ func TestConformance_ModelRequirementMissingOriginFailsRun(t *testing.T) {
 	}
 }
 
+func TestConformance_ModelRequirementWithToolOriginFailsDeterministically(t *testing.T) {
+	t.Parallel()
+
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "approval required",
+			Requirement: &agent.PendingRequirement{
+				ID:     "req-model-wrong-origin",
+				Kind:   agent.RequirementKindApproval,
+				Origin: agent.RequirementOriginTool,
+			},
+		},
+	})
+	loop, err := agentreact.New(model, newRegistry(map[string]handler{}), events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("model-wrong-origin"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      "conformance-model-wrong-origin",
+		UserPrompt: "start",
+		MaxSteps:   3,
+	})
+	if !errors.Is(runErr, agent.ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusFailed {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared after invalid model requirement")
+	}
+	if !strings.Contains(result.State.Error, "source=model") {
+		t.Fatalf("unexpected state error: %q", result.State.Error)
+	}
+	if countEventType(events.Events(), agent.EventTypeRunSuspended) != 0 {
+		t.Fatalf("unexpected run_suspended event for invalid model requirement origin")
+	}
+	if countEventType(events.Events(), agent.EventTypeRunFailed) != 1 {
+		t.Fatalf("expected single run_failed event")
+	}
+}
+
 func TestConformance_RunSuspendsWhenToolExecutorRequestsSuspension(t *testing.T) {
 	t.Parallel()
 
@@ -1627,6 +1681,87 @@ func TestConformance_ToolSuspensionInvalidRequirementFailsRun(t *testing.T) {
 	}
 	if countEventType(events.Events(), agent.EventTypeRunSuspended) != 0 {
 		t.Fatalf("unexpected run_suspended event for invalid requirement")
+	}
+}
+
+func TestConformance_ToolSuspendRequestWithModelOriginFailsDeterministically(t *testing.T) {
+	t.Parallel()
+
+	events := newEventSink()
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "need tool input",
+			ToolCalls: []agent.ToolCall{
+				{ID: "call-1", Name: "lookup"},
+			},
+		},
+	})
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			return "", &agent.SuspendRequestError{
+				Requirement: &agent.PendingRequirement{
+					ID:     "req-tool-wrong-origin",
+					Kind:   agent.RequirementKindUserInput,
+					Origin: agent.RequirementOriginModel,
+				},
+			}
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-wrong-origin"),
+		RunStore:    newRunStore(),
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	result, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      "conformance-tool-wrong-origin",
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if !errors.Is(runErr, agent.ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusFailed {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared on invalid tool suspend origin")
+	}
+	if !strings.Contains(result.State.Error, "source=tool") {
+		t.Fatalf("unexpected state error: %q", result.State.Error)
+	}
+
+	var toolResultEvent *agent.Event
+	for i := range events.Events() {
+		current := events.Events()[i]
+		if current.Type == agent.EventTypeToolResult {
+			toolResultEvent = &current
+			break
+		}
+	}
+	if toolResultEvent == nil || toolResultEvent.ToolResult == nil {
+		t.Fatalf("expected tool_result event")
+	}
+	if toolResultEvent.ToolResult.FailureReason != agent.ToolFailureReasonExecutorError {
+		t.Fatalf("unexpected tool failure reason: %s", toolResultEvent.ToolResult.FailureReason)
+	}
+	if countEventType(events.Events(), agent.EventTypeRunSuspended) != 0 {
+		t.Fatalf("unexpected run_suspended event for invalid tool requirement origin")
+	}
+	if countEventType(events.Events(), agent.EventTypeRunFailed) != 1 {
+		t.Fatalf("expected one run_failed event")
 	}
 }
 

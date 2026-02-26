@@ -147,6 +147,9 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 				)
 			}
 			requirementCopy := *assistant.Requirement
+			if err := validateModelRequirement(&state, &requirementCopy); err != nil {
+				return l.failRun(ctx, state, err, eventErr)
+			}
 			state.PendingRequirement = &requirementCopy
 			if err := agent.TransitionRunStatus(&state, agent.RunStatusSuspended); err != nil {
 				state.PendingRequirement = nil
@@ -184,6 +187,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 			}
 			result := agent.ToolResult{}
 			var suspendRequestErr *agent.SuspendRequestError
+			var invalidSuspendErr error
 			switch {
 			case !defined:
 				result = normalizedToolErrorResult(
@@ -204,7 +208,12 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 						return l.cancelRun(ctx, state, cancellationErr, eventErr)
 					}
 					if errors.As(toolErr, &suspendRequestErr) {
-						result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonSuspended, toolErr)
+						invalidSuspendErr = validateToolSuspendRequest(&state, suspendRequestErr)
+						if invalidSuspendErr != nil {
+							result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, invalidSuspendErr)
+						} else {
+							result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonSuspended, toolErr)
+						}
 					} else {
 						result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, toolErr)
 					}
@@ -231,13 +240,12 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 				Type:       agent.EventTypeToolResult,
 				ToolResult: &resultCopy,
 			}))
+			if invalidSuspendErr != nil {
+				return l.failRun(ctx, state, invalidSuspendErr, eventErr)
+			}
 			if suspendRequestErr != nil {
-				if suspendRequestErr.Requirement == nil {
-					state.PendingRequirement = nil
-				} else {
-					requirementCopy := *suspendRequestErr.Requirement
-					state.PendingRequirement = &requirementCopy
-				}
+				requirementCopy := *suspendRequestErr.Requirement
+				state.PendingRequirement = &requirementCopy
 				if err := agent.TransitionRunStatus(&state, agent.RunStatusSuspended); err != nil {
 					state.PendingRequirement = nil
 					return l.failRun(ctx, state, err, eventErr)
@@ -288,6 +296,49 @@ func validateToolResultIdentity(call agent.ToolCall, result agent.ToolResult) er
 		return fmt.Errorf("tool result name mismatch: got=%q want=%q", result.Name, call.Name)
 	}
 	return nil
+}
+
+func validateModelRequirement(state *agent.RunState, requirement *agent.PendingRequirement) error {
+	if requirement.Origin != agent.RequirementOriginModel {
+		return fmt.Errorf(
+			"%w: field=pending_requirement.origin reason=invalid_for_source source=model value=%q want=%q",
+			agent.ErrRunStateInvalid,
+			requirement.Origin,
+			agent.RequirementOriginModel,
+		)
+	}
+	return validateRequirementContract(state, requirement)
+}
+
+func validateToolSuspendRequest(state *agent.RunState, request *agent.SuspendRequestError) error {
+	if request == nil || request.Requirement == nil {
+		return fmt.Errorf(
+			"%w: field=pending_requirement reason=nil source=tool",
+			agent.ErrRunStateInvalid,
+		)
+	}
+	if request.Requirement.Origin != agent.RequirementOriginTool {
+		return fmt.Errorf(
+			"%w: field=pending_requirement.origin reason=invalid_for_source source=tool value=%q want=%q",
+			agent.ErrRunStateInvalid,
+			request.Requirement.Origin,
+			agent.RequirementOriginTool,
+		)
+	}
+	return validateRequirementContract(state, request.Requirement)
+}
+
+func validateRequirementContract(state *agent.RunState, requirement *agent.PendingRequirement) error {
+	if state == nil {
+		return errors.New("requirement validation state is nil")
+	}
+	return agent.ValidateRunState(agent.RunState{
+		ID:                 state.ID,
+		Version:            state.Version,
+		Step:               state.Step,
+		Status:             agent.RunStatusSuspended,
+		PendingRequirement: requirement,
+	})
 }
 
 func validateToolCallShape(calls []agent.ToolCall) error {
