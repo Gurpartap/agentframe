@@ -155,6 +155,48 @@ func TestExecutorBashPolicyRejectsForbiddenToken(t *testing.T) {
 	}
 }
 
+func TestExecutorBashPolicyApprovedReplayOverrideBypassesSuspendRequest(t *testing.T) {
+	t.Parallel()
+
+	policy, err := toolset.NewPolicy(t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatalf("new policy: %v", err)
+	}
+	executor := toolset.NewExecutor(policy)
+
+	call := agent.ToolCall{
+		ID:   "bash-denied-replay-1",
+		Name: toolset.ToolBash,
+		Arguments: map[string]any{
+			"command": "ls; pwd",
+		},
+	}
+
+	_, err = executor.Execute(context.Background(), call)
+	var suspendErr *agent.SuspendRequestError
+	if !errors.As(err, &suspendErr) {
+		t.Fatalf("expected SuspendRequestError, got %T (%v)", err, err)
+	}
+	if suspendErr.Requirement == nil {
+		t.Fatalf("expected suspend requirement payload")
+	}
+	if suspendErr.Requirement.Fingerprint == "" {
+		t.Fatalf("expected non-empty fingerprint")
+	}
+
+	override := agent.ApprovedToolCallReplayOverride{
+		ToolCallID:  suspendErr.Requirement.ToolCallID,
+		Fingerprint: suspendErr.Requirement.Fingerprint,
+	}
+	result, err := executor.Execute(agent.WithApprovedToolCallReplayOverride(context.Background(), override), call)
+	if err != nil {
+		t.Fatalf("replayed execution returned error: %v", err)
+	}
+	if !strings.Contains(result.Content, "bash_ok") {
+		t.Fatalf("unexpected replayed content: %q", result.Content)
+	}
+}
+
 func TestExecutorBashTimeout(t *testing.T) {
 	t.Parallel()
 

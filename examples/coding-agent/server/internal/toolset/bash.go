@@ -20,19 +20,23 @@ func (e *Executor) executeBash(ctx context.Context, call agent.ToolCall) (string
 	}
 	if err := e.policy.ValidateBashCommand(command); err != nil {
 		if errors.Is(err, ErrBashCommandDenied) {
-			return "", &agent.SuspendRequestError{
-				Requirement: &agent.PendingRequirement{
-					ID:          fmt.Sprintf("req-bash-policy-%s", call.ID),
-					Kind:        agent.RequirementKindApproval,
-					Origin:      agent.RequirementOriginTool,
-					ToolCallID:  call.ID,
-					Fingerprint: bashApprovalFingerprint(call.ID, command),
-					Prompt:      "approve bash command denied by policy",
-				},
-				Err: err,
+			fingerprint := bashApprovalFingerprint(call.ID, command)
+			if !approvedBashReplay(ctx, call.ID, fingerprint) {
+				return "", &agent.SuspendRequestError{
+					Requirement: &agent.PendingRequirement{
+						ID:          fmt.Sprintf("req-bash-policy-%s", call.ID),
+						Kind:        agent.RequirementKindApproval,
+						Origin:      agent.RequirementOriginTool,
+						ToolCallID:  call.ID,
+						Fingerprint: fingerprint,
+						Prompt:      "approve bash command denied by policy",
+					},
+					Err: err,
+				}
 			}
+		} else {
+			return "", err
 		}
-		return "", err
 	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, e.policy.BashTimeout())
@@ -78,4 +82,12 @@ func (e *Executor) executeBash(ctx context.Context, call agent.ToolCall) (string
 func bashApprovalFingerprint(callID, command string) string {
 	sum := sha256.Sum256([]byte(callID + "\n" + strings.TrimSpace(command)))
 	return hex.EncodeToString(sum[:])
+}
+
+func approvedBashReplay(ctx context.Context, callID, fingerprint string) bool {
+	override, ok := agent.ApprovedToolCallReplayOverrideFromContext(ctx)
+	if !ok {
+		return false
+	}
+	return override.ToolCallID == callID && override.Fingerprint == fingerprint
 }

@@ -116,6 +116,33 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 	if input.Resolution != nil {
 		state.Messages = append(state.Messages, resolutionMessage(input.Resolution))
 	}
+	replayCall, replayApprovedToolCall, replayContractErr := approvedToolReplayCallFromInput(ctx, &state, input)
+	if replayContractErr != nil {
+		return l.failRun(ctx, state, replayContractErr, eventErr)
+	}
+	if replayApprovedToolCall {
+		replayedResult, replayErr := l.executeApprovedToolReplay(ctx, replayCall)
+		if replayErr != nil {
+			if cancellationErr := contextCancellationError(ctx, replayErr); cancellationErr != nil {
+				return l.cancelRun(ctx, state, cancellationErr, eventErr)
+			}
+			return l.failRun(ctx, state, replayErr, eventErr)
+		}
+		if replayedResult.CallID == "" {
+			replayedResult.CallID = replayCall.ID
+		}
+		if replayedResult.Name == "" {
+			replayedResult.Name = replayCall.Name
+		}
+		state.Messages = append(state.Messages, agent.ToolResultMessage(replayedResult))
+		replayedResultCopy := replayedResult
+		eventErr = errors.Join(eventErr, publishEvent(ctx, l.events, agent.Event{
+			RunID:      state.ID,
+			Step:       state.Step,
+			Type:       agent.EventTypeToolResult,
+			ToolResult: &replayedResultCopy,
+		}))
+	}
 	for state.Step < maxSteps {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return l.cancelRun(ctx, state, ctxErr, eventErr)
@@ -293,6 +320,116 @@ func contextCancellationError(ctx context.Context, err error) error {
 	default:
 		return nil
 	}
+}
+
+func approvedToolReplayCallFromInput(
+	ctx context.Context,
+	state *agent.RunState,
+	input agent.EngineInput,
+) (agent.ToolCall, bool, error) {
+	if input.ResolvedRequirement == nil || input.Resolution == nil {
+		return agent.ToolCall{}, false, nil
+	}
+	requirement := input.ResolvedRequirement
+	resolution := input.Resolution
+	if requirement.Origin != agent.RequirementOriginTool {
+		return agent.ToolCall{}, false, nil
+	}
+	if resolution.Kind != agent.RequirementKindApproval || resolution.Outcome != agent.ResolutionOutcomeApproved {
+		return agent.ToolCall{}, false, nil
+	}
+	if requirement.Kind != agent.RequirementKindApproval {
+		return agent.ToolCall{}, false, fmt.Errorf(
+			"%w: field=resolved_requirement.kind reason=invalid_for_approved_tool_replay got=%q want=%q",
+			agent.ErrRunStateInvalid,
+			requirement.Kind,
+			agent.RequirementKindApproval,
+		)
+	}
+	if err := validateRequirementContract(state, requirement); err != nil {
+		return agent.ToolCall{}, false, err
+	}
+	if resolution.RequirementID != requirement.ID {
+		return agent.ToolCall{}, false, fmt.Errorf(
+			"%w: field=resolution.requirement_id reason=mismatch got=%q want=%q",
+			agent.ErrRunStateInvalid,
+			resolution.RequirementID,
+			requirement.ID,
+		)
+	}
+	call, found := findToolCallByID(state.Messages, requirement.ToolCallID)
+	if !found {
+		return agent.ToolCall{}, false, fmt.Errorf(
+			"%w: field=resolved_requirement.tool_call_id reason=not_found value=%q",
+			agent.ErrRunStateInvalid,
+			requirement.ToolCallID,
+		)
+	}
+	override, ok := agent.ApprovedToolCallReplayOverrideFromContext(ctx)
+	if !ok {
+		return agent.ToolCall{}, false, fmt.Errorf(
+			"%w: field=approved_tool_replay_override reason=missing",
+			agent.ErrRunStateInvalid,
+		)
+	}
+	if override.ToolCallID != requirement.ToolCallID {
+		return agent.ToolCall{}, false, fmt.Errorf(
+			"%w: field=approved_tool_replay_override.tool_call_id reason=mismatch got=%q want=%q",
+			agent.ErrRunStateInvalid,
+			override.ToolCallID,
+			requirement.ToolCallID,
+		)
+	}
+	if override.Fingerprint != requirement.Fingerprint {
+		return agent.ToolCall{}, false, fmt.Errorf(
+			"%w: field=approved_tool_replay_override.fingerprint reason=mismatch got=%q want=%q",
+			agent.ErrRunStateInvalid,
+			override.Fingerprint,
+			requirement.Fingerprint,
+		)
+	}
+	return call, true, nil
+}
+
+func findToolCallByID(messages []agent.Message, toolCallID string) (agent.ToolCall, bool) {
+	if toolCallID == "" {
+		return agent.ToolCall{}, false
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		message := messages[i]
+		if message.Role != agent.RoleAssistant {
+			continue
+		}
+		for j := len(message.ToolCalls) - 1; j >= 0; j-- {
+			call := message.ToolCalls[j]
+			if call.ID == toolCallID {
+				return agent.CloneToolCall(call), true
+			}
+		}
+	}
+	return agent.ToolCall{}, false
+}
+
+func (l *ReactLoop) executeApprovedToolReplay(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) {
+	replayed, replayErr := l.tools.Execute(ctx, call)
+	if replayErr != nil {
+		if cancellationErr := contextCancellationError(ctx, replayErr); cancellationErr != nil {
+			return agent.ToolResult{}, cancellationErr
+		}
+		var suspendRequestErr *agent.SuspendRequestError
+		if errors.As(replayErr, &suspendRequestErr) {
+			return agent.ToolResult{}, fmt.Errorf(
+				"%w: field=replay_tool_result reason=suspend_request_forbidden call_id=%q",
+				agent.ErrRunStateInvalid,
+				call.ID,
+			)
+		}
+		return normalizedToolErrorResult(call, agent.ToolFailureReasonExecutorError, replayErr), nil
+	}
+	if identityErr := validateToolResultIdentity(call, replayed); identityErr != nil {
+		return normalizedToolErrorResult(call, agent.ToolFailureReasonExecutorError, identityErr), nil
+	}
+	return replayed, nil
 }
 
 func validateToolResultIdentity(call agent.ToolCall, result agent.ToolResult) error {

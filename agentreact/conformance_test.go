@@ -1654,6 +1654,285 @@ func TestConformance_ContinueFromToolSuspensionWithMatchingResolution(t *testing
 	}
 }
 
+func TestConformance_ContinueFromApprovedToolSuspensionReplaysBlockedCallOnceBeforeModel(t *testing.T) {
+	t.Parallel()
+
+	const runID = agent.RunID("conformance-tool-approval-replay")
+
+	store := newRunStore()
+	events := newEventSink()
+	model := newScriptedModel(
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "need approval for blocked tool call",
+				ToolCalls: []agent.ToolCall{
+					{ID: "call-1", Name: "lookup"},
+				},
+			},
+		},
+		response{
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "completed after replay",
+			},
+		},
+	)
+
+	var toolExecutions atomic.Int32
+	registry := newRegistry(map[string]handler{
+		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+			switch toolExecutions.Add(1) {
+			case 1:
+				return "", &agent.SuspendRequestError{
+					Requirement: &agent.PendingRequirement{
+						ID:          "req-tool-approval",
+						Kind:        agent.RequirementKindApproval,
+						Origin:      agent.RequirementOriginTool,
+						Fingerprint: "fp-call-1",
+					},
+				}
+			case 2:
+				return "replayed-ok", nil
+			default:
+				return "unexpected-extra-execution", nil
+			}
+		},
+	})
+	loop, err := agentreact.New(model, registry, events)
+	if err != nil {
+		t.Fatalf("new loop: %v", err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		IDGenerator: newCounterIDGenerator("tool-approval-replay"),
+		RunStore:    store,
+		Engine:      loop,
+		EventSink:   events,
+	})
+	if err != nil {
+		t.Fatalf("new runner: %v", err)
+	}
+
+	runResult, runErr := runner.Run(context.Background(), agent.RunInput{
+		RunID:      runID,
+		UserPrompt: "start",
+		MaxSteps:   3,
+		Tools: []agent.ToolDefinition{
+			{Name: "lookup"},
+		},
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	if runResult.State.Status != agent.RunStatusSuspended {
+		t.Fatalf("unexpected run status: %s", runResult.State.Status)
+	}
+	if runResult.State.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement")
+	}
+	if runResult.State.PendingRequirement.ToolCallID != "call-1" {
+		t.Fatalf("unexpected requirement tool call id: %q", runResult.State.PendingRequirement.ToolCallID)
+	}
+	if runResult.State.PendingRequirement.Fingerprint != "fp-call-1" {
+		t.Fatalf("unexpected requirement fingerprint: %q", runResult.State.PendingRequirement.Fingerprint)
+	}
+	if toolExecutions.Load() != 1 {
+		t.Fatalf("expected one tool execution during initial run, got %d", toolExecutions.Load())
+	}
+	prefix := agent.CloneMessages(runResult.State.Messages)
+
+	continueResult, continueErr := runner.Continue(context.Background(), runID, 3, []agent.ToolDefinition{
+		{Name: "lookup"},
+	}, &agent.Resolution{
+		RequirementID: "req-tool-approval",
+		Kind:          agent.RequirementKindApproval,
+		Outcome:       agent.ResolutionOutcomeApproved,
+	})
+	if continueErr != nil {
+		t.Fatalf("continue returned error: %v", continueErr)
+	}
+	if continueResult.State.Status != agent.RunStatusCompleted {
+		t.Fatalf("unexpected continue status: %s", continueResult.State.Status)
+	}
+	if continueResult.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared after continue")
+	}
+	if toolExecutions.Load() != 2 {
+		t.Fatalf("blocked call replay must execute exactly once on continue, got %d", toolExecutions.Load())
+	}
+	if len(continueResult.State.Messages) <= len(prefix) {
+		t.Fatalf("expected transcript growth after continue")
+	}
+	if !reflect.DeepEqual(continueResult.State.Messages[:len(prefix)], prefix) {
+		t.Fatalf("continue mutated transcript prefix")
+	}
+	delta := continueResult.State.Messages[len(prefix):]
+	if len(delta) < 3 {
+		t.Fatalf("expected resolution, replay tool result, and assistant completion messages")
+	}
+	if delta[0].Role != agent.RoleUser || !strings.HasPrefix(delta[0].Content, "[resolution]") {
+		t.Fatalf("unexpected resolution message: %+v", delta[0])
+	}
+	if delta[1].Role != agent.RoleTool || delta[1].ToolCallID != "call-1" || delta[1].Content != "replayed-ok" {
+		t.Fatalf("unexpected replay tool message: %+v", delta[1])
+	}
+	if delta[2].Role != agent.RoleAssistant || delta[2].Content != "completed after replay" {
+		t.Fatalf("unexpected assistant completion message: %+v", delta[2])
+	}
+
+	gotEvents := events.Events()
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeToolResult,
+		agent.EventTypeRunSuspended,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+		agent.EventTypeToolResult,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	wantSteps := []int{0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2}
+	if len(gotEvents) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(gotEvents), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if gotEvents[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, gotEvents[i].Type, wantTypes[i])
+		}
+		if gotEvents[i].Step != wantSteps[i] {
+			t.Fatalf("event[%d] step mismatch: got=%d want=%d", i, gotEvents[i].Step, wantSteps[i])
+		}
+	}
+	if gotEvents[5].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected start command kind: got=%s want=%s", gotEvents[5].CommandKind, agent.CommandKindStart)
+	}
+	if gotEvents[10].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected continue command kind: got=%s want=%s", gotEvents[10].CommandKind, agent.CommandKindContinue)
+	}
+	if gotEvents[2].ToolResult == nil || gotEvents[2].ToolResult.FailureReason != agent.ToolFailureReasonSuspended {
+		t.Fatalf("unexpected initial suspended tool result payload")
+	}
+	if gotEvents[6].ToolResult == nil {
+		t.Fatalf("missing replay tool result payload")
+	}
+	if gotEvents[6].ToolResult.CallID != "call-1" || gotEvents[6].ToolResult.FailureReason != "" {
+		t.Fatalf("unexpected replay tool result payload: %+v", *gotEvents[6].ToolResult)
+	}
+}
+
+func TestConformance_ApprovedToolReplayMismatchFailsDeterministically(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name            string
+		override        agent.ApprovedToolCallReplayOverride
+		wantErrContains string
+	}{
+		{
+			name: "tool_call_id_mismatch",
+			override: agent.ApprovedToolCallReplayOverride{
+				ToolCallID:  "call-other",
+				Fingerprint: "fp-call-1",
+			},
+			wantErrContains: "approved_tool_replay_override.tool_call_id",
+		},
+		{
+			name: "fingerprint_mismatch",
+			override: agent.ApprovedToolCallReplayOverride{
+				ToolCallID:  "call-1",
+				Fingerprint: "fp-call-other",
+			},
+			wantErrContains: "approved_tool_replay_override.fingerprint",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			events := newEventSink()
+			model := newScriptedModel()
+			var toolExecutions atomic.Int32
+			registry := newRegistry(map[string]handler{
+				"lookup": func(_ context.Context, _ map[string]any) (string, error) {
+					toolExecutions.Add(1)
+					return "unexpected", nil
+				},
+			})
+			loop, err := agentreact.New(model, registry, events)
+			if err != nil {
+				t.Fatalf("new loop: %v", err)
+			}
+
+			state := agent.RunState{
+				ID:     agent.RunID("replay-mismatch-" + tc.name),
+				Status: agent.RunStatusRunning,
+				Step:   3,
+				Messages: []agent.Message{
+					{Role: agent.RoleUser, Content: "start"},
+					{
+						Role:    agent.RoleAssistant,
+						Content: "tool call",
+						ToolCalls: []agent.ToolCall{
+							{ID: "call-1", Name: "lookup"},
+						},
+					},
+					{
+						Role:       agent.RoleTool,
+						Name:       "lookup",
+						ToolCallID: "call-1",
+						Content:    "blocked",
+					},
+				},
+			}
+			ctx := agent.WithApprovedToolCallReplayOverride(context.Background(), tc.override)
+			result, runErr := loop.Execute(ctx, state, agent.EngineInput{
+				MaxSteps: 4,
+				Tools: []agent.ToolDefinition{
+					{Name: "lookup"},
+				},
+				Resolution: &agent.Resolution{
+					RequirementID: "req-tool-approval",
+					Kind:          agent.RequirementKindApproval,
+					Outcome:       agent.ResolutionOutcomeApproved,
+				},
+				ResolvedRequirement: &agent.PendingRequirement{
+					ID:          "req-tool-approval",
+					Kind:        agent.RequirementKindApproval,
+					Origin:      agent.RequirementOriginTool,
+					ToolCallID:  "call-1",
+					Fingerprint: "fp-call-1",
+				},
+			})
+			if !errors.Is(runErr, agent.ErrRunStateInvalid) {
+				t.Fatalf("expected ErrRunStateInvalid, got %v", runErr)
+			}
+			if result.Status != agent.RunStatusFailed {
+				t.Fatalf("unexpected status: %s", result.Status)
+			}
+			if !strings.Contains(result.Error, tc.wantErrContains) {
+				t.Fatalf("unexpected state error: %q", result.Error)
+			}
+			if toolExecutions.Load() != 0 {
+				t.Fatalf("tool replay must not execute on contract mismatch, calls=%d", toolExecutions.Load())
+			}
+			if countEventType(events.Events(), agent.EventTypeRunFailed) != 1 {
+				t.Fatalf("expected one run_failed event")
+			}
+			if countEventType(events.Events(), agent.EventTypeRunSuspended) != 0 {
+				t.Fatalf("unexpected run_suspended event on replay mismatch")
+			}
+			if countEventType(events.Events(), agent.EventTypeToolResult) != 0 {
+				t.Fatalf("unexpected tool_result event on replay mismatch")
+			}
+		})
+	}
+}
+
 func TestConformance_ToolSuspensionInvalidRequirementFailsRun(t *testing.T) {
 	t.Parallel()
 
