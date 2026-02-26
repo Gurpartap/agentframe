@@ -26,7 +26,8 @@ func TestShutdownClosesActiveEventStream(t *testing.T) {
 	cfg.ToolMode = config.ToolModeMock
 	cfg.ShutdownTimeout = 2 * time.Second
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, nil))
 	application, err := New(cfg, logger)
 	if err != nil {
 		t.Fatalf("new app: %v", err)
@@ -82,6 +83,54 @@ func TestShutdownClosesActiveEventStream(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for server exit")
+	}
+
+	if !strings.Contains(logBuffer.String(), "graceful shutdown timed out; forcing connection close") {
+		t.Fatalf("expected forced-close shutdown warning log, got: %s", logBuffer.String())
+	}
+}
+
+func TestShutdownWithoutActiveStreamIsGraceful(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	cfg.HTTPAddr = pickLocalAddr(t)
+	cfg.ModelMode = config.ModelModeMock
+	cfg.ToolMode = config.ToolModeMock
+	cfg.ShutdownTimeout = 2 * time.Second
+
+	var logBuffer bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuffer, nil))
+	application, err := New(cfg, logger)
+	if err != nil {
+		t.Fatalf("new app: %v", err)
+	}
+
+	serverErrCh := make(chan error, 1)
+	go func() {
+		serverErrCh <- application.Start()
+	}()
+
+	baseURL := "http://" + cfg.HTTPAddr
+	waitForHealthz(t, baseURL)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := application.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown app: %v", err)
+	}
+
+	select {
+	case err := <-serverErrCh:
+		if err != nil {
+			t.Fatalf("server exited with error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for server exit")
+	}
+
+	if strings.Contains(logBuffer.String(), "graceful shutdown timed out; forcing connection close") {
+		t.Fatalf("expected graceful shutdown path without forced close warning, got: %s", logBuffer.String())
 	}
 }
 

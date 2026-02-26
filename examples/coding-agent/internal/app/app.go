@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"sync/atomic"
 
@@ -17,11 +16,11 @@ import (
 
 // App owns runtime wiring and HTTP server lifecycle.
 type App struct {
-	cfg               config.Config
-	runtime           *runtimewire.Runtime
-	server            *http.Server
-	cancelServerScope context.CancelFunc
-	ready             atomic.Bool
+	cfg     config.Config
+	logger  *slog.Logger
+	runtime *runtimewire.Runtime
+	server  *http.Server
+	ready   atomic.Bool
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
@@ -43,11 +42,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("new app runtime: %w", err)
 	}
 
-	serverScopeCtx, cancelServerScope := context.WithCancel(context.Background())
 	a := &App{
-		cfg:               cfg,
-		runtime:           runtime,
-		cancelServerScope: cancelServerScope,
+		cfg:     cfg,
+		logger:  logger,
+		runtime: runtime,
 	}
 
 	apiRouter := httpapi.NewRouter(runtime)
@@ -59,9 +57,6 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	a.server = &http.Server{
 		Addr:    cfg.HTTPAddr,
 		Handler: handler,
-		BaseContext: func(_ net.Listener) context.Context {
-			return serverScopeCtx
-		},
 	}
 
 	return a, nil
@@ -83,8 +78,19 @@ func (a *App) Shutdown(ctx context.Context) error {
 		return errors.New("shutdown: nil context")
 	}
 	a.ready.Store(false)
-	a.cancelServerScope()
-	return a.server.Shutdown(ctx)
+
+	err := a.server.Shutdown(ctx)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		a.logger.Warn("graceful shutdown timed out; forcing connection close")
+		if closeErr := a.server.Close(); closeErr != nil {
+			return fmt.Errorf("shutdown timeout and forced close failed: %w", errors.Join(err, closeErr))
+		}
+		return nil
+	}
+	return err
 }
 
 func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
