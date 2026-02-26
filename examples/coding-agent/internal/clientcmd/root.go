@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/clientapi"
@@ -17,6 +18,7 @@ const usageText = `Usage:
   coding-agent-client [global flags] <command> [args]
 
 Commands:
+  chat
   health
   start --user-prompt <text> [--run-id <id>] [--system-prompt <text>] [--max-steps <n>]
   get <run-id>
@@ -34,6 +36,10 @@ Global flags:
 `
 
 func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return executeWithInput(ctx, args, os.Stdin, stdout, stderr)
+}
+
+func executeWithInput(ctx context.Context, args []string, input io.Reader, stdout, stderr io.Writer) error {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -90,6 +96,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	commandArgs := remaining[1:]
 
 	switch command {
+	case "chat":
+		return runChat(ctx, api, cfg.BaseURL, input, stdout)
 	case "health":
 		return runHealth(ctx, api, cfg.JSON, commandArgs, stdout)
 	case "start":
