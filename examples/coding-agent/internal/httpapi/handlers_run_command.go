@@ -201,7 +201,7 @@ func (h *handlers) handleRunFollowUp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) ensureRuntime(w http.ResponseWriter) bool {
-	if h.runtime == nil || h.runtime.Runner == nil || h.runtime.RunStore == nil {
+	if h.runtime == nil || h.runtime.Runner == nil || h.runtime.RunStore == nil || h.runtime.StreamBroker == nil {
 		writeError(w, http.StatusInternalServerError, errorCodeRuntime, "runtime dependencies are not initialized")
 		return false
 	}

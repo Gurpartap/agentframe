@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runstream"
 )
 
 const maxRequestBodyBytes = 1 << 20
@@ -116,6 +117,8 @@ func mapRuntimeError(err error) (int, string) {
 	case errors.Is(err, agent.ErrRunNotFound):
 		return http.StatusNotFound, errorCodeNotFound
 	case errors.Is(err, agent.ErrCommandConflict), errors.Is(err, agent.ErrRunVersionConflict):
+		return http.StatusConflict, errorCodeConflict
+	case errors.Is(err, runstream.ErrCursorInvalid), errors.Is(err, runstream.ErrCursorExpired):
 		return http.StatusConflict, errorCodeConflict
 	case errors.Is(err, agent.ErrRunNotContinuable),
 		errors.Is(err, agent.ErrRunNotCancellable),

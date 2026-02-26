@@ -20,5 +20,6 @@ func NewRouter(runtime *runtimewire.Runtime) http.Handler {
 	mux.HandleFunc("POST /v1/runs/{run_id}/steer", h.handleRunSteer)
 	mux.HandleFunc("POST /v1/runs/{run_id}/follow-up", h.handleRunFollowUp)
 	mux.HandleFunc("GET /v1/runs/{run_id}", h.handleRunQuery)
+	mux.HandleFunc("GET /v1/runs/{run_id}/events", h.handleRunEvents)
 	return mux
 }
