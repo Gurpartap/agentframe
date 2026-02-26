@@ -1140,6 +1140,15 @@ func TestRunnerDispatch_SuspendedResolutionGating(t *testing.T) {
 			if input.Resolution.Outcome != agent.ResolutionOutcomeApproved {
 				t.Fatalf("unexpected resolution outcome: %s", input.Resolution.Outcome)
 			}
+			if input.ResolvedRequirement == nil {
+				t.Fatalf("continue resolved requirement must be forwarded to engine input")
+			}
+			if input.ResolvedRequirement.ID != "req-approval" {
+				t.Fatalf("unexpected resolved requirement id: %q", input.ResolvedRequirement.ID)
+			}
+			if input.ResolvedRequirement.Origin != agent.RequirementOriginModel {
+				t.Fatalf("unexpected resolved requirement origin: %s", input.ResolvedRequirement.Origin)
+			}
 			next := state
 			next.Step++
 			next.Status = agent.RunStatusCompleted

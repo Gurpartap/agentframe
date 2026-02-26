@@ -264,10 +264,11 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 						next.Step++
 						next.Status = agent.RunStatusSuspended
 						next.PendingRequirement = &agent.PendingRequirement{
-							ID:         "req-tool",
-							Kind:       agent.RequirementKindUserInput,
-							Origin:     agent.RequirementOriginTool,
-							ToolCallID: "call-required",
+							ID:          "req-tool",
+							Kind:        agent.RequirementKindUserInput,
+							Origin:      agent.RequirementOriginTool,
+							ToolCallID:  "call-required",
+							Fingerprint: "fp-call-required",
 						}
 						next.Messages = append(next.Messages, agent.Message{
 							Role:    agent.RoleAssistant,
@@ -328,10 +329,11 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 						next.Step++
 						next.Status = agent.RunStatusSuspended
 						next.PendingRequirement = &agent.PendingRequirement{
-							ID:         "req-tool-unrelated",
-							Kind:       agent.RequirementKindUserInput,
-							Origin:     agent.RequirementOriginTool,
-							ToolCallID: "call-required",
+							ID:          "req-tool-unrelated",
+							Kind:        agent.RequirementKindUserInput,
+							Origin:      agent.RequirementOriginTool,
+							ToolCallID:  "call-required",
+							Fingerprint: "fp-call-required",
 						}
 						next.Messages = append(next.Messages, agent.Message{
 							Role:    agent.RoleAssistant,
@@ -420,10 +422,11 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 						next.Step++
 						next.Status = agent.RunStatusSuspended
 						next.PendingRequirement = &agent.PendingRequirement{
-							ID:         "req-tool-prefix",
-							Kind:       agent.RequirementKindUserInput,
-							Origin:     agent.RequirementOriginTool,
-							ToolCallID: "call-prefix",
+							ID:          "req-tool-prefix",
+							Kind:        agent.RequirementKindUserInput,
+							Origin:      agent.RequirementOriginTool,
+							ToolCallID:  "call-prefix",
+							Fingerprint: "fp-call-prefix",
 						}
 						next.Messages = append(next.Messages, agent.Message{
 							Role:       agent.RoleTool,

@@ -45,11 +45,12 @@ const (
 
 // PendingRequirement describes the requirement that currently blocks run progress.
 type PendingRequirement struct {
-	ID         string            `json:"id"`
-	Kind       RequirementKind   `json:"kind"`
-	Origin     RequirementOrigin `json:"origin"`
-	ToolCallID string            `json:"tool_call_id,omitempty"`
-	Prompt     string            `json:"prompt,omitempty"`
+	ID          string            `json:"id"`
+	Kind        RequirementKind   `json:"kind"`
+	Origin      RequirementOrigin `json:"origin"`
+	ToolCallID  string            `json:"tool_call_id,omitempty"`
+	Fingerprint string            `json:"fingerprint,omitempty"`
+	Prompt      string            `json:"prompt,omitempty"`
 }
 
 // Resolution provides the typed payload required to continue a suspended run.

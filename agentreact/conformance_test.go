@@ -1114,10 +1114,11 @@ func TestConformance_RunSuspendsWhenToolExecutorRequestsSuspension(t *testing.T)
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			return "", &agent.SuspendRequestError{
 				Requirement: &agent.PendingRequirement{
-					ID:     "req-tool-input",
-					Kind:   agent.RequirementKindUserInput,
-					Origin: agent.RequirementOriginTool,
-					Prompt: "provide tool input",
+					ID:          "req-tool-input",
+					Kind:        agent.RequirementKindUserInput,
+					Origin:      agent.RequirementOriginTool,
+					Fingerprint: "fp-call-1",
+					Prompt:      "provide tool input",
 				},
 			}
 		},
@@ -1165,6 +1166,9 @@ func TestConformance_RunSuspendsWhenToolExecutorRequestsSuspension(t *testing.T)
 	if result.State.PendingRequirement.ToolCallID != "call-1" {
 		t.Fatalf("unexpected requirement tool call id: %q", result.State.PendingRequirement.ToolCallID)
 	}
+	if result.State.PendingRequirement.Fingerprint != "fp-call-1" {
+		t.Fatalf("unexpected requirement fingerprint: %q", result.State.PendingRequirement.Fingerprint)
+	}
 	if countEventType(events.Events(), agent.EventTypeRunSuspended) != 1 {
 		t.Fatalf("expected single run_suspended event")
 	}
@@ -1190,9 +1194,10 @@ func TestConformance_ToolSuspensionEmitsSuspendedToolResult(t *testing.T) {
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			return "", &agent.SuspendRequestError{
 				Requirement: &agent.PendingRequirement{
-					ID:     "req-tool-input",
-					Kind:   agent.RequirementKindUserInput,
-					Origin: agent.RequirementOriginTool,
+					ID:          "req-tool-input",
+					Kind:        agent.RequirementKindUserInput,
+					Origin:      agent.RequirementOriginTool,
+					Fingerprint: "fp-call-1",
 				},
 			}
 		},
@@ -1281,9 +1286,10 @@ func TestConformance_ToolSuspensionStopsRemainingToolCalls(t *testing.T) {
 			firstCalls.Add(1)
 			return "", &agent.SuspendRequestError{
 				Requirement: &agent.PendingRequirement{
-					ID:     "req-stop",
-					Kind:   agent.RequirementKindApproval,
-					Origin: agent.RequirementOriginTool,
+					ID:          "req-stop",
+					Kind:        agent.RequirementKindApproval,
+					Origin:      agent.RequirementOriginTool,
+					Fingerprint: "fp-call-suspend",
 				},
 			}
 		},
@@ -1350,9 +1356,10 @@ func TestConformance_ToolSuspensionEventOrdering(t *testing.T) {
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			return "", &agent.SuspendRequestError{
 				Requirement: &agent.PendingRequirement{
-					ID:     "req-tool-order",
-					Kind:   agent.RequirementKindUserInput,
-					Origin: agent.RequirementOriginTool,
+					ID:          "req-tool-order",
+					Kind:        agent.RequirementKindUserInput,
+					Origin:      agent.RequirementOriginTool,
+					Fingerprint: "fp-call-1",
 				},
 			}
 		},
@@ -1445,9 +1452,10 @@ func TestConformance_ContinueFromToolSuspensionRequiresResolution(t *testing.T) 
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			return "", &agent.SuspendRequestError{
 				Requirement: &agent.PendingRequirement{
-					ID:     "req-tool-continue",
-					Kind:   agent.RequirementKindUserInput,
-					Origin: agent.RequirementOriginTool,
+					ID:          "req-tool-continue",
+					Kind:        agent.RequirementKindUserInput,
+					Origin:      agent.RequirementOriginTool,
+					Fingerprint: "fp-call-1",
 				},
 			}
 		},
@@ -1485,6 +1493,9 @@ func TestConformance_ContinueFromToolSuspensionRequiresResolution(t *testing.T) 
 	}
 	if runResult.State.PendingRequirement.ToolCallID != "call-1" {
 		t.Fatalf("unexpected requirement tool call id: %q", runResult.State.PendingRequirement.ToolCallID)
+	}
+	if runResult.State.PendingRequirement.Fingerprint != "fp-call-1" {
+		t.Fatalf("unexpected requirement fingerprint: %q", runResult.State.PendingRequirement.Fingerprint)
 	}
 	persistedBeforeContinue, err := store.Load(context.Background(), runID)
 	if err != nil {
@@ -1534,9 +1545,10 @@ func TestConformance_ContinueFromToolSuspensionWithMatchingResolution(t *testing
 		"lookup": func(_ context.Context, _ map[string]any) (string, error) {
 			return "", &agent.SuspendRequestError{
 				Requirement: &agent.PendingRequirement{
-					ID:     "req-tool-continue",
-					Kind:   agent.RequirementKindUserInput,
-					Origin: agent.RequirementOriginTool,
+					ID:          "req-tool-continue",
+					Kind:        agent.RequirementKindUserInput,
+					Origin:      agent.RequirementOriginTool,
+					Fingerprint: "fp-call-1",
 				},
 			}
 		},
@@ -1574,6 +1586,9 @@ func TestConformance_ContinueFromToolSuspensionWithMatchingResolution(t *testing
 	}
 	if runResult.State.PendingRequirement.ToolCallID != "call-1" {
 		t.Fatalf("unexpected requirement tool call id: %q", runResult.State.PendingRequirement.ToolCallID)
+	}
+	if runResult.State.PendingRequirement.Fingerprint != "fp-call-1" {
+		t.Fatalf("unexpected requirement fingerprint: %q", runResult.State.PendingRequirement.Fingerprint)
 	}
 	prefix := agent.CloneMessages(runResult.State.Messages)
 

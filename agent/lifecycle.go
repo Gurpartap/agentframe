@@ -71,6 +71,13 @@ func validatePendingRequirementContract(requirement *PendingRequirement) error {
 			requirement.Origin,
 		)
 	}
+	if requirement.Origin == RequirementOriginTool && requirement.Fingerprint == "" {
+		return fmt.Errorf(
+			"%w: field=pending_requirement.fingerprint reason=empty_for_origin origin=%s",
+			ErrRunStateInvalid,
+			requirement.Origin,
+		)
+	}
 	return nil
 }
 

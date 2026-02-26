@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 )
 
 // Dependencies wires application services into the runtime orchestrator.
@@ -17,10 +18,50 @@ type Dependencies struct {
 
 // Runner owns the run lifecycle and persistence.
 type Runner struct {
-	idGen  IDGenerator
-	store  RunStore
-	engine Engine
-	events EventSink
+	idGen        IDGenerator
+	store        RunStore
+	engine       Engine
+	events       EventSink
+	commandLocks *runCommandLocks
+}
+
+type runCommandLocks struct {
+	mu      sync.Mutex
+	entries map[RunID]*runCommandLock
+}
+
+type runCommandLock struct {
+	mu       sync.Mutex
+	refCount int
+}
+
+func newRunCommandLocks() *runCommandLocks {
+	return &runCommandLocks{
+		entries: make(map[RunID]*runCommandLock),
+	}
+}
+
+func (l *runCommandLocks) lock(runID RunID) func() {
+	l.mu.Lock()
+	entry, exists := l.entries[runID]
+	if !exists {
+		entry = &runCommandLock{}
+		l.entries[runID] = entry
+	}
+	entry.refCount++
+	l.mu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+
+		l.mu.Lock()
+		entry.refCount--
+		if entry.refCount == 0 {
+			delete(l.entries, runID)
+		}
+		l.mu.Unlock()
+	}
 }
 
 func NewRunner(deps Dependencies) (*Runner, error) {
@@ -37,10 +78,11 @@ func NewRunner(deps Dependencies) (*Runner, error) {
 		deps.EventSink = noopEventSink{}
 	}
 	return &Runner{
-		idGen:  deps.IDGenerator,
-		store:  deps.RunStore,
-		engine: deps.Engine,
-		events: deps.EventSink,
+		idGen:        deps.IDGenerator,
+		store:        deps.RunStore,
+		engine:       deps.Engine,
+		events:       deps.EventSink,
+		commandLocks: newRunCommandLocks(),
 	}, nil
 }
 
@@ -303,6 +345,32 @@ func sideEffectContext(ctx context.Context) context.Context {
 	return ctx
 }
 
+func (r *Runner) lockRunMutation(runID RunID) func() {
+	if runID == "" || r.commandLocks == nil {
+		return func() {}
+	}
+	return r.commandLocks.lock(runID)
+}
+
+func approvedToolCallReplayOverrideForContinue(
+	resolution *Resolution,
+	requirement *PendingRequirement,
+) (ApprovedToolCallReplayOverride, bool) {
+	if resolution == nil || requirement == nil {
+		return ApprovedToolCallReplayOverride{}, false
+	}
+	if resolution.Outcome != ResolutionOutcomeApproved {
+		return ApprovedToolCallReplayOverride{}, false
+	}
+	if requirement.Origin != RequirementOriginTool {
+		return ApprovedToolCallReplayOverride{}, false
+	}
+	return ApprovedToolCallReplayOverride{
+		ToolCallID:  requirement.ToolCallID,
+		Fingerprint: requirement.Fingerprint,
+	}, true
+}
+
 // Dispatch executes a typed command against the run store.
 func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
 	if ctx == nil {
@@ -319,12 +387,20 @@ func (r *Runner) Dispatch(ctx context.Context, cmd Command) (RunResult, error) {
 	case StartCommand:
 		return r.dispatchStart(ctx, command)
 	case ContinueCommand:
+		unlock := r.lockRunMutation(command.RunID)
+		defer unlock()
 		return r.dispatchContinue(ctx, command)
 	case CancelCommand:
+		unlock := r.lockRunMutation(command.RunID)
+		defer unlock()
 		return r.dispatchCancel(ctx, command)
 	case SteerCommand:
+		unlock := r.lockRunMutation(command.RunID)
+		defer unlock()
 		return r.dispatchSteer(ctx, command)
 	case FollowUpCommand:
+		unlock := r.lockRunMutation(command.RunID)
+		defer unlock()
 		return r.dispatchFollowUp(ctx, command)
 	default:
 		switch kind := cmd.Kind(); kind {
@@ -481,16 +557,26 @@ func (r *Runner) dispatchContinue(ctx context.Context, cmd ContinueCommand) (Run
 	if err := validateContinueResolution(state, cmd); err != nil {
 		return RunResult{State: state}, err
 	}
+	var resolvedRequirement *PendingRequirement
 	if state.Status == RunStatusSuspended {
+		if state.PendingRequirement != nil {
+			resolvedRequirementCopy := *state.PendingRequirement
+			resolvedRequirement = &resolvedRequirementCopy
+		}
 		state.PendingRequirement = nil
 		if err := TransitionRunStatus(&state, RunStatusRunning); err != nil {
 			return RunResult{State: state}, err
 		}
 	}
-	finalState, runErr := r.engine.Execute(ctx, state, EngineInput{
-		MaxSteps:   cmd.MaxSteps,
-		Tools:      CloneToolDefinitions(cmd.Tools),
-		Resolution: cmd.Resolution,
+	continueCtx := ctx
+	if override, ok := approvedToolCallReplayOverrideForContinue(cmd.Resolution, resolvedRequirement); ok {
+		continueCtx = WithApprovedToolCallReplayOverride(continueCtx, override)
+	}
+	finalState, runErr := r.engine.Execute(continueCtx, state, EngineInput{
+		MaxSteps:            cmd.MaxSteps,
+		Tools:               CloneToolDefinitions(cmd.Tools),
+		Resolution:          cmd.Resolution,
+		ResolvedRequirement: resolvedRequirement,
 	})
 	var eventErr error
 	if contractErr := validateEngineOutput(state, finalState); contractErr != nil {

@@ -453,9 +453,10 @@ func TestToolFailure_SuspendedReasonNormalization(t *testing.T) {
 	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
 		return agent.ToolResult{}, &agent.SuspendRequestError{
 			Requirement: &agent.PendingRequirement{
-				ID:     "req-tool-suspend",
-				Kind:   agent.RequirementKindUserInput,
-				Origin: agent.RequirementOriginTool,
+				ID:          "req-tool-suspend",
+				Kind:        agent.RequirementKindUserInput,
+				Origin:      agent.RequirementOriginTool,
+				Fingerprint: "fp-call-1",
 			},
 		}
 	})
@@ -576,10 +577,11 @@ func TestToolFailure_InvalidSuspendRequestToolCallIDMismatchUsesExecutorError(t 
 	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
 		return agent.ToolResult{}, &agent.SuspendRequestError{
 			Requirement: &agent.PendingRequirement{
-				ID:         "req-invalid-tool-call-id",
-				Kind:       agent.RequirementKindUserInput,
-				Origin:     agent.RequirementOriginTool,
-				ToolCallID: "call-other",
+				ID:          "req-invalid-tool-call-id",
+				Kind:        agent.RequirementKindUserInput,
+				Origin:      agent.RequirementOriginTool,
+				ToolCallID:  "call-other",
+				Fingerprint: "fp-call-1",
 			},
 		}
 	})

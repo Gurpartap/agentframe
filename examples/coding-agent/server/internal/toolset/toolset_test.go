@@ -147,6 +147,9 @@ func TestExecutorBashPolicyRejectsForbiddenToken(t *testing.T) {
 	if suspendErr.Requirement.ToolCallID != "bash-denied-1" {
 		t.Fatalf("requirement tool_call_id mismatch: got=%q want=%q", suspendErr.Requirement.ToolCallID, "bash-denied-1")
 	}
+	if suspendErr.Requirement.Fingerprint == "" {
+		t.Fatalf("requirement fingerprint must be populated for tool-origin suspension")
+	}
 	if !errors.Is(err, toolset.ErrBashCommandDenied) {
 		t.Fatalf("expected ErrBashCommandDenied, got %v", err)
 	}

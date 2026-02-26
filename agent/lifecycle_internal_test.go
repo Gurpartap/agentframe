@@ -142,6 +142,44 @@ func TestTransitionRunStatus_ToSuspendedRequiresValidRequirementOrigin(t *testin
 	}
 }
 
+func TestTransitionRunStatus_ToSuspendedToolOriginRequiresReplayBinding(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name        string
+		toolCallID  string
+		fingerprint string
+	}{
+		{name: "missing_tool_call_id", fingerprint: "fp-call-1"},
+		{name: "missing_fingerprint", toolCallID: "call-1"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			state := RunState{
+				Status: RunStatusRunning,
+				PendingRequirement: &PendingRequirement{
+					ID:          "req-tool",
+					Kind:        RequirementKindApproval,
+					Origin:      RequirementOriginTool,
+					ToolCallID:  tc.toolCallID,
+					Fingerprint: tc.fingerprint,
+				},
+			}
+			err := TransitionRunStatus(&state, RunStatusSuspended)
+			if !errors.Is(err, ErrRunStateInvalid) {
+				t.Fatalf("expected ErrRunStateInvalid, got %v", err)
+			}
+			if state.Status != RunStatusRunning {
+				t.Fatalf("status changed on invalid suspension transition: got=%s want=%s", state.Status, RunStatusRunning)
+			}
+		})
+	}
+}
+
 func TestTransitionRunStatus_Invalid(t *testing.T) {
 	t.Parallel()
 

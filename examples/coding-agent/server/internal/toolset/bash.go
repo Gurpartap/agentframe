@@ -3,6 +3,8 @@ package toolset
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -20,11 +22,12 @@ func (e *Executor) executeBash(ctx context.Context, call agent.ToolCall) (string
 		if errors.Is(err, ErrBashCommandDenied) {
 			return "", &agent.SuspendRequestError{
 				Requirement: &agent.PendingRequirement{
-					ID:         fmt.Sprintf("req-bash-policy-%s", call.ID),
-					Kind:       agent.RequirementKindApproval,
-					Origin:     agent.RequirementOriginTool,
-					ToolCallID: call.ID,
-					Prompt:     "approve bash command denied by policy",
+					ID:          fmt.Sprintf("req-bash-policy-%s", call.ID),
+					Kind:        agent.RequirementKindApproval,
+					Origin:      agent.RequirementOriginTool,
+					ToolCallID:  call.ID,
+					Fingerprint: bashApprovalFingerprint(call.ID, command),
+					Prompt:      "approve bash command denied by policy",
 				},
 				Err: err,
 			}
@@ -70,4 +73,9 @@ func (e *Executor) executeBash(ctx context.Context, call agent.ToolCall) (string
 		strings.TrimSpace(stdout.String()),
 		strings.TrimSpace(stderr.String()),
 	), nil
+}
+
+func bashApprovalFingerprint(callID, command string) string {
+	sum := sha256.Sum256([]byte(callID + "\n" + strings.TrimSpace(command)))
+	return hex.EncodeToString(sum[:])
 }
