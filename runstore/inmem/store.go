@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 // Store persists run state in memory with optimistic version checks.

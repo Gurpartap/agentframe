@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"agentruntime/agent"
-	runstoreinmem "agentruntime/runstore/inmem"
+	"github.com/Gurpartap/agentframe/agent"
+	runstoreinmem "github.com/Gurpartap/agentframe/runstore/inmem"
 )
 
 func TestRunnerRun_EventPublishFailureKeepsPersistedState(t *testing.T) {

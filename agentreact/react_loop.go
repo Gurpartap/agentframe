@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 const DefaultMaxSteps = 8

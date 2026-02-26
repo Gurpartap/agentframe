@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"agentruntime/agent"
-	runstoreinmem "agentruntime/runstore/inmem"
+	"github.com/Gurpartap/agentframe/agent"
+	runstoreinmem "github.com/Gurpartap/agentframe/runstore/inmem"
 )
 
 func TestNewRunner_ValidatesRequiredDependencies(t *testing.T) {

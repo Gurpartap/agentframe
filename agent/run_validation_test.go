@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 func TestValidateRunStateMatrix(t *testing.T) {

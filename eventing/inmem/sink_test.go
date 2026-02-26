@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"agentruntime/agent"
-	eventinginmem "agentruntime/eventing/inmem"
+	"github.com/Gurpartap/agentframe/agent"
+	eventinginmem "github.com/Gurpartap/agentframe/eventing/inmem"
 )
 
 func TestSink_EventsReturnsDeepClonedSnapshot(t *testing.T) {

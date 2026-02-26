@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"agentruntime/agent"
-	"agentruntime/agentreact"
+	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/agentreact"
 )
 
 func TestConformance_EventOrdering(t *testing.T) {

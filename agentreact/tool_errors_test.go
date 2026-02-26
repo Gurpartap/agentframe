@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"agentruntime/agent"
-	"agentruntime/agentreact"
+	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/agentreact"
 )
 
 func TestToolFailure_UnknownTool(t *testing.T) {

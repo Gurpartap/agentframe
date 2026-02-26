@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 type engineFunc func(context.Context, agent.RunState, agent.EngineInput) (agent.RunState, error)

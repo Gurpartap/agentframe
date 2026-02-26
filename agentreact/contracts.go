@@ -3,7 +3,7 @@ package agentreact
 import (
 	"context"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 // ModelRequest is the model input contract for the ReAct engine.

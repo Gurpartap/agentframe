@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"agentruntime/agent"
-	"agentruntime/agentreact"
+	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/agentreact"
 )
 
 func TestRunnerRun_CompletesAfterToolObservation(t *testing.T) {

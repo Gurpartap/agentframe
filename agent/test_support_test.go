@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 type response struct {

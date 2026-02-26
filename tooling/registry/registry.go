@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 var (

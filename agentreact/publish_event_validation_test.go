@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 func TestPublishEventRejectsInvalidPayloadBeforeSink(t *testing.T) {

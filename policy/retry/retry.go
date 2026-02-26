@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 // Config controls retry behavior for wrapped engine execution calls.

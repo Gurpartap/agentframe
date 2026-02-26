@@ -6,11 +6,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"agentruntime/agent"
-	"agentruntime/agentreact"
-	eventinginmem "agentruntime/eventing/inmem"
-	runstoreinmem "agentruntime/runstore/inmem"
-	toolingregistry "agentruntime/tooling/registry"
+	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/agentreact"
+	eventinginmem "github.com/Gurpartap/agentframe/eventing/inmem"
+	runstoreinmem "github.com/Gurpartap/agentframe/runstore/inmem"
+	toolingregistry "github.com/Gurpartap/agentframe/tooling/registry"
 )
 
 type response struct {

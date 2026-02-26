@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 // Sink captures runtime events in memory and exposes deterministic snapshots.

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"sort"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 func indexToolDefinitions(definitions []agent.ToolDefinition) map[string]agent.ToolDefinition {

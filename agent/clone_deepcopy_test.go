@@ -3,7 +3,7 @@ package agent_test
 import (
 	"testing"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 func TestCloneToolCall_DeepCopiesNestedArguments(t *testing.T) {

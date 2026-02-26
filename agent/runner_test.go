@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"agentruntime/agent"
-	eventinginmem "agentruntime/eventing/inmem"
-	runstoreinmem "agentruntime/runstore/inmem"
+	"github.com/Gurpartap/agentframe/agent"
+	eventinginmem "github.com/Gurpartap/agentframe/eventing/inmem"
+	runstoreinmem "github.com/Gurpartap/agentframe/runstore/inmem"
 )
 
 func TestRunnerRun_PersistsAndCompletesWithEngine(t *testing.T) {

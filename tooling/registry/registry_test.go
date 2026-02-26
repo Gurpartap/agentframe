@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"agentruntime/agent"
-	toolingregistry "agentruntime/tooling/registry"
+	"github.com/Gurpartap/agentframe/agent"
+	toolingregistry "github.com/Gurpartap/agentframe/tooling/registry"
 )
 
 func TestRegistryNew_RejectsInvalidInitialEntries(t *testing.T) {

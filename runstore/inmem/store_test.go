@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"agentruntime/agent"
-	runstoreinmem "agentruntime/runstore/inmem"
+	"github.com/Gurpartap/agentframe/agent"
+	runstoreinmem "github.com/Gurpartap/agentframe/runstore/inmem"
 )
 
 func TestStore_SaveVersioningAndConflict(t *testing.T) {

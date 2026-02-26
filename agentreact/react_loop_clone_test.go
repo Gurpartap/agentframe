@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"agentruntime/agent"
+	"github.com/Gurpartap/agentframe/agent"
 )
 
 func TestReactLoopExecute_ClonesToolDefinitionsForModelRequests(t *testing.T) {
