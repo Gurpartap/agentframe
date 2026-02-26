@@ -103,7 +103,8 @@ func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 			return "value", nil
 		},
 	})
-	loop, err := agentreact.New(model, registry, newEventSink())
+	events := newEventSink()
+	loop, err := agentreact.New(model, registry, events)
 	if err != nil {
 		t.Fatalf("new loop: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 		IDGenerator: newCounterIDGenerator("test"),
 		RunStore:    newRunStore(),
 		Engine:      loop,
-		EventSink:   newEventSink(),
+		EventSink:   events,
 	})
 	if err != nil {
 		t.Fatalf("new runner: %v", err)
@@ -132,5 +133,19 @@ func TestRunnerRun_MaxStepsExceeded(t *testing.T) {
 	}
 	if result.State.Version != 2 {
 		t.Fatalf("unexpected version: %d", result.State.Version)
+	}
+	wantDescription := "run failed: " + agent.ErrMaxStepsExceeded.Error()
+	runFailedEvents := 0
+	for _, event := range events.Events() {
+		if event.Type != agent.EventTypeRunFailed {
+			continue
+		}
+		runFailedEvents++
+		if event.Description != wantDescription {
+			t.Fatalf("unexpected run_failed description: got=%q want=%q", event.Description, wantDescription)
+		}
+	}
+	if runFailedEvents != 1 {
+		t.Fatalf("unexpected run_failed event count: got=%d want=1", runFailedEvents)
 	}
 }

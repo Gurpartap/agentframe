@@ -558,6 +558,68 @@ func TestToolFailure_InvalidSuspendRequestUsesExecutorError(t *testing.T) {
 	}
 }
 
+func TestToolFailure_InvalidSuspendRequestToolCallIDMismatchUsesExecutorError(t *testing.T) {
+	t.Parallel()
+
+	model := newScriptedModel(response{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "calling tool with mismatched suspend tool_call_id",
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:   "call-1",
+					Name: "lookup",
+				},
+			},
+		},
+	})
+	executor := toolExecutorFunc(func(_ context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
+		return agent.ToolResult{}, &agent.SuspendRequestError{
+			Requirement: &agent.PendingRequirement{
+				ID:         "req-invalid-tool-call-id",
+				Kind:       agent.RequirementKindUserInput,
+				Origin:     agent.RequirementOriginTool,
+				ToolCallID: "call-other",
+			},
+		}
+	})
+
+	result, runErr, events := runToolTestExpectError(t, model, executor, []agent.ToolDefinition{
+		{Name: "lookup"},
+	})
+	if !errors.Is(runErr, agent.ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", runErr)
+	}
+	if result.State.Status != agent.RunStatusFailed {
+		t.Fatalf("unexpected status: %s", result.State.Status)
+	}
+	if result.State.PendingRequirement != nil {
+		t.Fatalf("pending requirement must be cleared on invalid suspend request")
+	}
+	if !strings.Contains(result.State.Error, "pending_requirement.tool_call_id") {
+		t.Fatalf("unexpected state error: %q", result.State.Error)
+	}
+	if !strings.Contains(result.State.Error, "reason=mismatch") {
+		t.Fatalf("unexpected state error: %q", result.State.Error)
+	}
+
+	toolResult := mustToolResultEvent(t, events.Events())
+	if !toolResult.IsError {
+		t.Fatalf("expected tool result error")
+	}
+	if toolResult.FailureReason != agent.ToolFailureReasonExecutorError {
+		t.Fatalf("unexpected failure reason: %s", toolResult.FailureReason)
+	}
+	if strings.Contains(toolResult.Content, string(agent.ToolFailureReasonSuspended)) {
+		t.Fatalf("invalid suspend request must not be normalized as suspended: %q", toolResult.Content)
+	}
+	runFailedEvent := mustSingleRunFailedEvent(t, events.Events())
+	wantDescription := "run failed: " + result.State.Error
+	if runFailedEvent.Description != wantDescription {
+		t.Fatalf("unexpected run failed description: got=%q want=%q", runFailedEvent.Description, wantDescription)
+	}
+}
+
 func TestToolCallValidation_InvalidShapeFailsRunBeforeExecution(t *testing.T) {
 	t.Parallel()
 

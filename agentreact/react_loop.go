@@ -270,7 +270,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 		RunID:       state.ID,
 		Step:        state.Step,
 		Type:        agent.EventTypeRunFailed,
-		Description: agent.ErrMaxStepsExceeded.Error(),
+		Description: failureEventDescription(agent.ErrMaxStepsExceeded),
 	}))
 	return state, errors.Join(agent.ErrMaxStepsExceeded, eventErr)
 }
