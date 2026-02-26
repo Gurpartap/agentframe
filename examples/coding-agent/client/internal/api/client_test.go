@@ -80,10 +80,10 @@ func TestClientStartAndGet(t *testing.T) {
 	}
 }
 
-func TestClientParsesPendingRequirementOriginAndToolCallID(t *testing.T) {
+func TestClientParsesPendingRequirementReplayBinding(t *testing.T) {
 	t.Parallel()
 
-	const responseJSON = `{"run_id":"run-suspended","status":"suspended","step":1,"version":2,"pending_requirement":{"id":"req-tool","kind":"approval","origin":"tool","tool_call_id":"call-bash-1","prompt":"approve"}}` + "\n"
+	const responseJSON = `{"run_id":"run-suspended","status":"suspended","step":1,"version":2,"pending_requirement":{"id":"req-tool","kind":"approval","origin":"tool","tool_call_id":"call-bash-1","fingerprint":"fp-bash-1","prompt":"approve"}}` + "\n"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/runs/run-suspended" {
@@ -112,6 +112,9 @@ func TestClientParsesPendingRequirementOriginAndToolCallID(t *testing.T) {
 	}
 	if state.PendingRequirement.ToolCallID != "call-bash-1" {
 		t.Fatalf("pending requirement tool_call_id mismatch: got=%q want=%q", state.PendingRequirement.ToolCallID, "call-bash-1")
+	}
+	if state.PendingRequirement.Fingerprint != "fp-bash-1" {
+		t.Fatalf("pending requirement fingerprint mismatch: got=%q want=%q", state.PendingRequirement.Fingerprint, "fp-bash-1")
 	}
 }
 

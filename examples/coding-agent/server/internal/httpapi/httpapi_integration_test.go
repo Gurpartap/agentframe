@@ -28,11 +28,12 @@ type runStateResponse struct {
 	Output             string `json:"output"`
 	Error              string `json:"error"`
 	PendingRequirement *struct {
-		ID         string `json:"id"`
-		Kind       string `json:"kind"`
-		Origin     string `json:"origin"`
-		ToolCallID string `json:"tool_call_id,omitempty"`
-		Prompt     string `json:"prompt"`
+		ID          string `json:"id"`
+		Kind        string `json:"kind"`
+		Origin      string `json:"origin"`
+		ToolCallID  string `json:"tool_call_id,omitempty"`
+		Fingerprint string `json:"fingerprint,omitempty"`
+		Prompt      string `json:"prompt"`
 	} `json:"pending_requirement,omitempty"`
 }
 
@@ -231,6 +232,9 @@ func TestRunStartBashPolicyDeniedSuspendsWithToolOriginRequirement(t *testing.T)
 			"call-bash-denied-1",
 		)
 	}
+	if started.PendingRequirement.Fingerprint == "" {
+		t.Fatalf("expected pending requirement fingerprint")
+	}
 	if started.PendingRequirement.ID != "req-bash-policy-call-bash-denied-1" {
 		t.Fatalf(
 			"pending requirement id mismatch: got=%q want=%q",
@@ -240,6 +244,183 @@ func TestRunStartBashPolicyDeniedSuspendsWithToolOriginRequirement(t *testing.T)
 	}
 	if started.PendingRequirement.Prompt == "" {
 		t.Fatalf("expected pending requirement prompt")
+	}
+}
+
+func TestRunContinueApprovedToolReplayIsSingleUseAndRequiresNewApproval(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRuntimeConfig(
+		t,
+		httpapi.PolicyConfig{
+			AuthToken:           testAuthToken,
+			MaxRequestBodyBytes: 4 << 10,
+			RequestTimeout:      2 * time.Second,
+			MaxCommandSteps:     policylimit.DefaultMaxCommandSteps,
+		},
+		func(cfg *config.Config) {
+			cfg.ModelMode = config.ModelModeMock
+			cfg.ToolMode = config.ToolModeReal
+			cfg.WorkspaceRoot = t.TempDir()
+		},
+	)
+	defer server.Close()
+
+	var started runStateResponse
+	status := performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"user_prompt": "[e2e-bash-policy-two-stage]",
+		"max_steps":   8,
+	}, &started)
+	if status != http.StatusOK {
+		t.Fatalf("start status mismatch: got=%d want=%d", status, http.StatusOK)
+	}
+	if started.Status != string(agent.RunStatusSuspended) {
+		t.Fatalf("expected suspended start status, got=%s", started.Status)
+	}
+	if started.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement for suspended run")
+	}
+	if started.PendingRequirement.ToolCallID != "call-bash-denied-1" {
+		t.Fatalf(
+			"first pending requirement tool_call_id mismatch: got=%q want=%q",
+			started.PendingRequirement.ToolCallID,
+			"call-bash-denied-1",
+		)
+	}
+	if started.PendingRequirement.Fingerprint == "" {
+		t.Fatalf("expected first pending requirement fingerprint")
+	}
+
+	initialFrames := readNDJSONFrames(
+		t,
+		server.Client(),
+		server.URL+"/v1/runs/"+started.RunID+"/events?cursor=0",
+		6,
+		2*time.Second,
+	)
+	if initialFrames[2].Event.Type != agent.EventTypeToolResult {
+		t.Fatalf("initial tool result event type mismatch: got=%s want=%s", initialFrames[2].Event.Type, agent.EventTypeToolResult)
+	}
+	if initialFrames[2].Event.ToolResult == nil {
+		t.Fatalf("expected initial tool result payload")
+	}
+	if initialFrames[2].Event.ToolResult.CallID != "call-bash-denied-1" {
+		t.Fatalf(
+			"initial tool result call id mismatch: got=%q want=%q",
+			initialFrames[2].Event.ToolResult.CallID,
+			"call-bash-denied-1",
+		)
+	}
+	if initialFrames[2].Event.ToolResult.FailureReason != agent.ToolFailureReasonSuspended {
+		t.Fatalf(
+			"initial tool result failure reason mismatch: got=%q want=%q",
+			initialFrames[2].Event.ToolResult.FailureReason,
+			agent.ToolFailureReasonSuspended,
+		)
+	}
+
+	var continued runStateResponse
+	status = performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/"+started.RunID+"/continue", map[string]any{
+		"max_steps": 8,
+		"resolution": map[string]any{
+			"requirement_id": started.PendingRequirement.ID,
+			"kind":           started.PendingRequirement.Kind,
+			"outcome":        "approved",
+		},
+	}, &continued)
+	if status != http.StatusOK {
+		t.Fatalf("continue status mismatch: got=%d want=%d", status, http.StatusOK)
+	}
+	if continued.Status != string(agent.RunStatusSuspended) {
+		t.Fatalf("expected suspended continue status, got=%s", continued.Status)
+	}
+	if continued.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement after continue")
+	}
+	if continued.PendingRequirement.ToolCallID != "call-bash-denied-2" {
+		t.Fatalf(
+			"second pending requirement tool_call_id mismatch: got=%q want=%q",
+			continued.PendingRequirement.ToolCallID,
+			"call-bash-denied-2",
+		)
+	}
+	if continued.PendingRequirement.Fingerprint == "" {
+		t.Fatalf("expected second pending requirement fingerprint")
+	}
+	if continued.PendingRequirement.Fingerprint == started.PendingRequirement.Fingerprint {
+		t.Fatalf("expected second pending requirement fingerprint to differ from first")
+	}
+
+	continueFrames := readNDJSONFrames(
+		t,
+		server.Client(),
+		server.URL+"/v1/runs/"+started.RunID+"/events?cursor=6",
+		6,
+		2*time.Second,
+	)
+	expectedContinueTypes := []agent.EventType{
+		agent.EventTypeToolResult,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeToolResult,
+		agent.EventTypeRunSuspended,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	for i := range continueFrames {
+		if continueFrames[i].Event.Type != expectedContinueTypes[i] {
+			t.Fatalf(
+				"continue event type mismatch at index %d: got=%s want=%s",
+				i,
+				continueFrames[i].Event.Type,
+				expectedContinueTypes[i],
+			)
+		}
+	}
+	if continueFrames[0].Event.ToolResult == nil {
+		t.Fatalf("expected replay tool result payload")
+	}
+	if continueFrames[0].Event.ToolResult.CallID != "call-bash-denied-1" {
+		t.Fatalf(
+			"replay tool result call id mismatch: got=%q want=%q",
+			continueFrames[0].Event.ToolResult.CallID,
+			"call-bash-denied-1",
+		)
+	}
+	if continueFrames[0].Event.ToolResult.IsError {
+		t.Fatalf("expected replay tool result to be non-error")
+	}
+	if continueFrames[2].Event.ToolResult == nil {
+		t.Fatalf("expected second blocked tool result payload")
+	}
+	if continueFrames[2].Event.ToolResult.CallID != "call-bash-denied-2" {
+		t.Fatalf(
+			"second blocked tool result call id mismatch: got=%q want=%q",
+			continueFrames[2].Event.ToolResult.CallID,
+			"call-bash-denied-2",
+		)
+	}
+	if continueFrames[2].Event.ToolResult.FailureReason != agent.ToolFailureReasonSuspended {
+		t.Fatalf(
+			"second blocked tool failure reason mismatch: got=%q want=%q",
+			continueFrames[2].Event.ToolResult.FailureReason,
+			agent.ToolFailureReasonSuspended,
+		)
+	}
+
+	var resumed runStateResponse
+	status = performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/"+started.RunID+"/continue", map[string]any{
+		"max_steps": 8,
+		"resolution": map[string]any{
+			"requirement_id": continued.PendingRequirement.ID,
+			"kind":           continued.PendingRequirement.Kind,
+			"outcome":        "approved",
+		},
+	}, &resumed)
+	if status != http.StatusOK {
+		t.Fatalf("second continue status mismatch: got=%d want=%d", status, http.StatusOK)
+	}
+	if resumed.Status != string(agent.RunStatusCompleted) {
+		t.Fatalf("second continue status mismatch: got=%s want=%s", resumed.Status, agent.RunStatusCompleted)
 	}
 }
 

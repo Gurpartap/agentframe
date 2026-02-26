@@ -33,3 +33,18 @@ func TestApprovedToolCallReplayOverrideFromContextMissing(t *testing.T) {
 		t.Fatalf("expected no payload, got=%+v", got)
 	}
 }
+
+func TestApprovedToolCallReplayOverrideCanBeCleared(t *testing.T) {
+	t.Parallel()
+
+	ctx := agent.WithApprovedToolCallReplayOverride(context.Background(), agent.ApprovedToolCallReplayOverride{
+		ToolCallID:  "call-1",
+		Fingerprint: "fp-call-1",
+	})
+	ctx = agent.WithoutApprovedToolCallReplayOverride(ctx)
+
+	got, ok := agent.ApprovedToolCallReplayOverrideFromContext(ctx)
+	if ok {
+		t.Fatalf("expected cleared payload, got=%+v", got)
+	}
+}

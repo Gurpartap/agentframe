@@ -52,6 +52,14 @@ If a run is suspended, `/continue` prompts for:
 
 The client then submits a typed resolution payload through `continue`.
 
+When a suspension is tool-origin, command output includes replay binding context:
+
+- `pending_requirement.tool_call_id`
+- `pending_requirement.fingerprint`
+- `pending_requirement.replay_binding`
+
+An approved tool-origin `continue` authorizes one replay of that exact blocked call. If another blocked call appears later, it requires a new approval.
+
 ## Non-Interactive Commands
 
 Health:

@@ -141,6 +141,90 @@ func TestClientSuspendedResolutionContinueFlow(t *testing.T) {
 	}
 }
 
+func TestClientToolApprovalReplayOneShotFlow(t *testing.T) {
+	t.Parallel()
+
+	server, apiClient := newClientE2ERealToolServer(t)
+	defer server.Close()
+
+	started, _, err := apiClient.Start(context.Background(), api.StartRequest{
+		UserPrompt: "[e2e-bash-policy-two-stage]",
+		MaxSteps:   intPtr(8),
+	})
+	if err != nil {
+		t.Fatalf("start tool approval flow: %v", err)
+	}
+	if started.Status != string(agent.RunStatusSuspended) {
+		t.Fatalf("tool approval start status mismatch: got=%s want=%s", started.Status, agent.RunStatusSuspended)
+	}
+	if started.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement after start")
+	}
+	if started.PendingRequirement.Origin != string(agent.RequirementOriginTool) {
+		t.Fatalf(
+			"first pending requirement origin mismatch: got=%q want=%q",
+			started.PendingRequirement.Origin,
+			agent.RequirementOriginTool,
+		)
+	}
+	if started.PendingRequirement.ToolCallID != "call-bash-denied-1" {
+		t.Fatalf(
+			"first pending requirement tool_call_id mismatch: got=%q want=%q",
+			started.PendingRequirement.ToolCallID,
+			"call-bash-denied-1",
+		)
+	}
+	if started.PendingRequirement.Fingerprint == "" {
+		t.Fatalf("expected first pending requirement fingerprint")
+	}
+
+	firstContinued, _, err := apiClient.Continue(context.Background(), started.RunID, api.ContinueRequest{
+		MaxSteps: intPtr(8),
+		Resolution: &api.Resolution{
+			RequirementID: started.PendingRequirement.ID,
+			Kind:          started.PendingRequirement.Kind,
+			Outcome:       string(agent.ResolutionOutcomeApproved),
+		},
+	})
+	if err != nil {
+		t.Fatalf("first continue tool approval flow: %v", err)
+	}
+	if firstContinued.Status != string(agent.RunStatusSuspended) {
+		t.Fatalf("first continue status mismatch: got=%s want=%s", firstContinued.Status, agent.RunStatusSuspended)
+	}
+	if firstContinued.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement after first continue")
+	}
+	if firstContinued.PendingRequirement.ToolCallID != "call-bash-denied-2" {
+		t.Fatalf(
+			"second pending requirement tool_call_id mismatch: got=%q want=%q",
+			firstContinued.PendingRequirement.ToolCallID,
+			"call-bash-denied-2",
+		)
+	}
+	if firstContinued.PendingRequirement.Fingerprint == "" {
+		t.Fatalf("expected second pending requirement fingerprint")
+	}
+	if firstContinued.PendingRequirement.Fingerprint == started.PendingRequirement.Fingerprint {
+		t.Fatalf("expected second pending requirement fingerprint to differ from first")
+	}
+
+	secondContinued, _, err := apiClient.Continue(context.Background(), started.RunID, api.ContinueRequest{
+		MaxSteps: intPtr(8),
+		Resolution: &api.Resolution{
+			RequirementID: firstContinued.PendingRequirement.ID,
+			Kind:          firstContinued.PendingRequirement.Kind,
+			Outcome:       string(agent.ResolutionOutcomeApproved),
+		},
+	})
+	if err != nil {
+		t.Fatalf("second continue tool approval flow: %v", err)
+	}
+	if secondContinued.Status != string(agent.RunStatusCompleted) {
+		t.Fatalf("second continue status mismatch: got=%s want=%s", secondContinued.Status, agent.RunStatusCompleted)
+	}
+}
+
 func TestClientCancelFlow(t *testing.T) {
 	t.Parallel()
 
@@ -171,6 +255,20 @@ func newClientE2EServer(t *testing.T) (*httptest.Server, *api.Client) {
 	t.Helper()
 
 	server := testsupport.NewMockHTTPServer(t, testClientAuthToken)
+
+	apiClient, err := api.New(server.URL, testClientAuthToken, server.Client())
+	if err != nil {
+		server.Close()
+		t.Fatalf("new client api: %v", err)
+	}
+
+	return server, apiClient
+}
+
+func newClientE2ERealToolServer(t *testing.T) (*httptest.Server, *api.Client) {
+	t.Helper()
+
+	server := testsupport.NewRealToolHTTPServer(t, testClientAuthToken, t.TempDir())
 
 	apiClient, err := api.New(server.URL, testClientAuthToken, server.Client())
 	if err != nil {

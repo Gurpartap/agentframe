@@ -395,6 +395,21 @@ func writeRunState(out io.Writer, state api.RunState) error {
 				return err
 			}
 		}
+		if state.PendingRequirement.Fingerprint != "" {
+			if _, err := fmt.Fprintf(out, "pending_requirement.fingerprint: %s\n", state.PendingRequirement.Fingerprint); err != nil {
+				return err
+			}
+		}
+		if state.PendingRequirement.ToolCallID != "" && state.PendingRequirement.Fingerprint != "" {
+			if _, err := fmt.Fprintf(
+				out,
+				"pending_requirement.replay_binding: tool_call_id=%s fingerprint=%s\n",
+				state.PendingRequirement.ToolCallID,
+				state.PendingRequirement.Fingerprint,
+			); err != nil {
+				return err
+			}
+		}
 		if state.PendingRequirement.Prompt != "" {
 			if _, err := fmt.Fprintf(out, "pending_requirement.prompt: %s\n", state.PendingRequirement.Prompt); err != nil {
 				return err

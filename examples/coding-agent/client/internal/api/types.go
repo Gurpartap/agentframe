@@ -39,11 +39,12 @@ type RunState struct {
 }
 
 type PendingRequirement struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Origin     string `json:"origin"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	Prompt     string `json:"prompt,omitempty"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Origin      string `json:"origin"`
+	ToolCallID  string `json:"tool_call_id,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
 }
 
 type ErrorResponse struct {

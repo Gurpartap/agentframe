@@ -120,6 +120,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 	if replayContractErr != nil {
 		return l.failRun(ctx, state, replayContractErr, eventErr)
 	}
+	toolExecutionCtx := agent.WithoutApprovedToolCallReplayOverride(ctx)
 	if replayApprovedToolCall {
 		replayedResult, replayErr := l.executeApprovedToolReplay(ctx, replayCall)
 		if replayErr != nil {
@@ -237,7 +238,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 					validationErr,
 				)
 			default:
-				executed, toolErr := l.tools.Execute(ctx, toolCall)
+				executed, toolErr := l.tools.Execute(toolExecutionCtx, toolCall)
 				if toolErr != nil {
 					if cancellationErr := contextCancellationError(ctx, toolErr); cancellationErr != nil {
 						return l.cancelRun(ctx, state, cancellationErr, eventErr)

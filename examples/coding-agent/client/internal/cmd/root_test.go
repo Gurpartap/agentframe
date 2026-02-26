@@ -334,10 +334,10 @@ func TestExecuteContinueRejectsUnsupportedResolutionOutcome(t *testing.T) {
 	}
 }
 
-func TestExecutePrintsPendingRequirementOriginAndToolCallID(t *testing.T) {
+func TestExecutePrintsPendingRequirementReplayBinding(t *testing.T) {
 	t.Parallel()
 
-	responseJSON := `{"run_id":"run-suspended","status":"suspended","step":1,"version":2,"pending_requirement":{"id":"req-tool","kind":"approval","origin":"tool","tool_call_id":"call-bash-1","prompt":"approve"}}` + "\n"
+	responseJSON := `{"run_id":"run-suspended","status":"suspended","step":1,"version":2,"pending_requirement":{"id":"req-tool","kind":"approval","origin":"tool","tool_call_id":"call-bash-1","fingerprint":"fp-bash-1","prompt":"approve"}}` + "\n"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/runs/run-suspended" {
@@ -367,5 +367,11 @@ func TestExecutePrintsPendingRequirementOriginAndToolCallID(t *testing.T) {
 	}
 	if !strings.Contains(output, "pending_requirement.tool_call_id: call-bash-1") {
 		t.Fatalf("missing pending requirement tool_call_id in output: %q", output)
+	}
+	if !strings.Contains(output, "pending_requirement.fingerprint: fp-bash-1") {
+		t.Fatalf("missing pending requirement fingerprint in output: %q", output)
+	}
+	if !strings.Contains(output, "pending_requirement.replay_binding: tool_call_id=call-bash-1 fingerprint=fp-bash-1") {
+		t.Fatalf("missing pending requirement replay binding in output: %q", output)
 	}
 }

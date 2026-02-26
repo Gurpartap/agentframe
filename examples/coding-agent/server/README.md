@@ -21,6 +21,8 @@ Default listen address: `127.0.0.1:8080`
 - Model mode is selected by `CODING_AGENT_MODEL_MODE`.
 - Tool mode is selected by `CODING_AGENT_TOOL_MODE`.
 - Real tool mode exposes exactly `read`, `write`, `edit`, `bash`.
+- Tool-origin suspensions include replay binding fields: `pending_requirement.tool_call_id` and `pending_requirement.fingerprint`.
+- Approving a tool-origin requirement authorizes replay of exactly that blocked call once; any later blocked call requires a new approval.
 
 ## Configuration
 

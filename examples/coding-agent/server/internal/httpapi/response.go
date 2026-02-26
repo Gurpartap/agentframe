@@ -46,11 +46,12 @@ type runStateResponse struct {
 }
 
 type pendingRequirementResponse struct {
-	ID         string                  `json:"id"`
-	Kind       agent.RequirementKind   `json:"kind"`
-	Origin     agent.RequirementOrigin `json:"origin"`
-	ToolCallID string                  `json:"tool_call_id,omitempty"`
-	Prompt     string                  `json:"prompt,omitempty"`
+	ID          string                  `json:"id"`
+	Kind        agent.RequirementKind   `json:"kind"`
+	Origin      agent.RequirementOrigin `json:"origin"`
+	ToolCallID  string                  `json:"tool_call_id,omitempty"`
+	Fingerprint string                  `json:"fingerprint,omitempty"`
+	Prompt      string                  `json:"prompt,omitempty"`
 }
 
 func writeRunState(w http.ResponseWriter, status int, state agent.RunState) {
@@ -64,11 +65,12 @@ func writeRunState(w http.ResponseWriter, status int, state agent.RunState) {
 	}
 	if state.PendingRequirement != nil {
 		response.PendingRequirement = &pendingRequirementResponse{
-			ID:         state.PendingRequirement.ID,
-			Kind:       state.PendingRequirement.Kind,
-			Origin:     state.PendingRequirement.Origin,
-			ToolCallID: state.PendingRequirement.ToolCallID,
-			Prompt:     state.PendingRequirement.Prompt,
+			ID:          state.PendingRequirement.ID,
+			Kind:        state.PendingRequirement.Kind,
+			Origin:      state.PendingRequirement.Origin,
+			ToolCallID:  state.PendingRequirement.ToolCallID,
+			Fingerprint: state.PendingRequirement.Fingerprint,
+			Prompt:      state.PendingRequirement.Prompt,
 		}
 	}
 	writeJSON(w, status, response)
