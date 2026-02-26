@@ -398,8 +398,9 @@ func TestRunnerContinue_SuspendedRunRequiresResolution(t *testing.T) {
 		Status: agent.RunStatusSuspended,
 		Step:   2,
 		PendingRequirement: &agent.PendingRequirement{
-			ID:   "req-1",
-			Kind: agent.RequirementKindApproval,
+			ID:     "req-1",
+			Kind:   agent.RequirementKindApproval,
+			Origin: agent.RequirementOriginModel,
 		},
 	}
 	if err := store.Save(context.Background(), initial); err != nil {
@@ -481,8 +482,9 @@ func TestRunnerContinue_SuspendedRejectsInvalidResolution(t *testing.T) {
 		Status: agent.RunStatusSuspended,
 		Step:   1,
 		PendingRequirement: &agent.PendingRequirement{
-			ID:   "req-1",
-			Kind: agent.RequirementKindApproval,
+			ID:     "req-1",
+			Kind:   agent.RequirementKindApproval,
+			Origin: agent.RequirementOriginModel,
 		},
 	}
 	if err := store.Save(context.Background(), initial); err != nil {
@@ -528,8 +530,9 @@ func TestRunnerSteerAndFollowUp_SuspendedRejected(t *testing.T) {
 		ID:     agent.RunID("run-suspended-steer-followup-rejected"),
 		Status: agent.RunStatusSuspended,
 		PendingRequirement: &agent.PendingRequirement{
-			ID:   "req-1",
-			Kind: agent.RequirementKindUserInput,
+			ID:     "req-1",
+			Kind:   agent.RequirementKindUserInput,
+			Origin: agent.RequirementOriginModel,
 		},
 	}
 	if err := store.Save(context.Background(), initial); err != nil {
@@ -580,6 +583,7 @@ func TestRunnerRunContinue_SuspendedResolutionFlow(t *testing.T) {
 			next.PendingRequirement = &agent.PendingRequirement{
 				ID:     "req-approval",
 				Kind:   agent.RequirementKindApproval,
+				Origin: agent.RequirementOriginModel,
 				Prompt: "approve execution",
 			}
 			if err := agent.TransitionRunStatus(&next, agent.RunStatusSuspended); err != nil {

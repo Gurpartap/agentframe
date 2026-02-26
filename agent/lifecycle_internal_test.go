@@ -77,8 +77,9 @@ func TestTransitionRunStatus_Valid(t *testing.T) {
 			state := RunState{Status: tc.from}
 			if tc.to == RunStatusSuspended {
 				state.PendingRequirement = &PendingRequirement{
-					ID:   "req-transition",
-					Kind: RequirementKindApproval,
+					ID:     "req-transition",
+					Kind:   RequirementKindApproval,
+					Origin: RequirementOriginModel,
 				}
 			}
 			if err := TransitionRunStatus(&state, tc.to); err != nil {
@@ -103,6 +104,41 @@ func TestTransitionRunStatus_SuspendedRequiresPendingRequirement(t *testing.T) {
 	}
 	if state.Status != RunStatusRunning {
 		t.Fatalf("status changed on invalid suspension transition: got=%s want=%s", state.Status, RunStatusRunning)
+	}
+}
+
+func TestTransitionRunStatus_ToSuspendedRequiresValidRequirementOrigin(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name   string
+		origin RequirementOrigin
+	}{
+		{name: "missing_origin", origin: ""},
+		{name: "unknown_origin", origin: RequirementOrigin("unknown")},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			state := RunState{
+				Status: RunStatusRunning,
+				PendingRequirement: &PendingRequirement{
+					ID:     "req-origin",
+					Kind:   RequirementKindApproval,
+					Origin: tc.origin,
+				},
+			}
+			err := TransitionRunStatus(&state, RunStatusSuspended)
+			if !errors.Is(err, ErrRunStateInvalid) {
+				t.Fatalf("expected ErrRunStateInvalid, got %v", err)
+			}
+			if state.Status != RunStatusRunning {
+				t.Fatalf("status changed on invalid suspension transition: got=%s want=%s", state.Status, RunStatusRunning)
+			}
+		})
 	}
 }
 

@@ -42,8 +42,9 @@ func TestValidateRunStateMatrix(t *testing.T) {
 				Step:    3,
 				Status:  agent.RunStatusSuspended,
 				PendingRequirement: &agent.PendingRequirement{
-					ID:   "req-1",
-					Kind: agent.RequirementKindApproval,
+					ID:     "req-1",
+					Kind:   agent.RequirementKindApproval,
+					Origin: agent.RequirementOriginModel,
 				},
 			},
 		},
@@ -116,8 +117,9 @@ func TestValidateRunStateMatrix(t *testing.T) {
 				Step:    0,
 				Status:  agent.RunStatusRunning,
 				PendingRequirement: &agent.PendingRequirement{
-					ID:   "req-1",
-					Kind: agent.RequirementKindApproval,
+					ID:     "req-1",
+					Kind:   agent.RequirementKindApproval,
+					Origin: agent.RequirementOriginModel,
 				},
 			},
 			wantErr: true,
@@ -143,5 +145,46 @@ func TestValidateRunStateMatrix(t *testing.T) {
 				t.Fatalf("expected ErrInvalidRunID compatibility, got %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateRunState_SuspendedRequiresRequirementOrigin(t *testing.T) {
+	t.Parallel()
+
+	state := agent.RunState{
+		ID:      "run-suspended-missing-origin",
+		Version: 1,
+		Step:    2,
+		Status:  agent.RunStatusSuspended,
+		PendingRequirement: &agent.PendingRequirement{
+			ID:   "req-approval",
+			Kind: agent.RequirementKindApproval,
+		},
+	}
+
+	err := agent.ValidateRunState(state)
+	if !errors.Is(err, agent.ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", err)
+	}
+}
+
+func TestValidateRunState_RejectsUnknownRequirementOrigin(t *testing.T) {
+	t.Parallel()
+
+	state := agent.RunState{
+		ID:      "run-suspended-unknown-origin",
+		Version: 1,
+		Step:    2,
+		Status:  agent.RunStatusSuspended,
+		PendingRequirement: &agent.PendingRequirement{
+			ID:     "req-approval",
+			Kind:   agent.RequirementKindApproval,
+			Origin: agent.RequirementOrigin("mystery"),
+		},
+	}
+
+	err := agent.ValidateRunState(state)
+	if !errors.Is(err, agent.ErrRunStateInvalid) {
+		t.Fatalf("expected ErrRunStateInvalid, got %v", err)
 	}
 }

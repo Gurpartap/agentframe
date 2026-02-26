@@ -1031,8 +1031,9 @@ func TestRunnerDispatch_SuspendedResolutionGating(t *testing.T) {
 			{Role: agent.RoleUser, Content: "seed"},
 		},
 		PendingRequirement: &agent.PendingRequirement{
-			ID:   "req-approval",
-			Kind: agent.RequirementKindApproval,
+			ID:     "req-approval",
+			Kind:   agent.RequirementKindApproval,
+			Origin: agent.RequirementOriginModel,
 		},
 	}
 

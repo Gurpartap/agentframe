@@ -22,6 +22,15 @@ func isKnownRequirementKind(kind RequirementKind) bool {
 	}
 }
 
+func isKnownRequirementOrigin(origin RequirementOrigin) bool {
+	switch origin {
+	case RequirementOriginModel, RequirementOriginTool:
+		return true
+	default:
+		return false
+	}
+}
+
 func isKnownResolutionOutcome(outcome ResolutionOutcome) bool {
 	switch outcome {
 	case ResolutionOutcomeApproved,
@@ -46,6 +55,13 @@ func validatePendingRequirementContract(requirement *PendingRequirement) error {
 			"%w: field=pending_requirement.kind reason=unknown value=%q",
 			ErrRunStateInvalid,
 			requirement.Kind,
+		)
+	}
+	if !isKnownRequirementOrigin(requirement.Origin) {
+		return fmt.Errorf(
+			"%w: field=pending_requirement.origin reason=unknown value=%q",
+			ErrRunStateInvalid,
+			requirement.Origin,
 		)
 	}
 	return nil

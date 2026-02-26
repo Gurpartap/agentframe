@@ -212,6 +212,47 @@ func TestCloneToolDefinitions_DeepCopiesNestedInputSchema(t *testing.T) {
 	}
 }
 
+func TestCloneRunState_CopiesPendingRequirementOrigin(t *testing.T) {
+	t.Parallel()
+
+	original := agent.RunState{
+		ID:     "run-clone-origin",
+		Status: agent.RunStatusSuspended,
+		PendingRequirement: &agent.PendingRequirement{
+			ID:     "req-origin",
+			Kind:   agent.RequirementKindApproval,
+			Origin: agent.RequirementOriginModel,
+			Prompt: "approve",
+		},
+	}
+
+	cloned := agent.CloneRunState(original)
+	if cloned.PendingRequirement == nil {
+		t.Fatalf("expected cloned pending requirement")
+	}
+	if cloned.PendingRequirement.Origin != agent.RequirementOriginModel {
+		t.Fatalf("unexpected cloned origin: %s", cloned.PendingRequirement.Origin)
+	}
+
+	cloned.PendingRequirement.Origin = agent.RequirementOriginTool
+	cloned.PendingRequirement.Prompt = "mutated-clone"
+	if original.PendingRequirement.Origin != agent.RequirementOriginModel {
+		t.Fatalf("clone mutation leaked into original origin: %s", original.PendingRequirement.Origin)
+	}
+	if original.PendingRequirement.Prompt != "approve" {
+		t.Fatalf("clone mutation leaked into original prompt: %q", original.PendingRequirement.Prompt)
+	}
+
+	original.PendingRequirement.Origin = agent.RequirementOrigin("original-only")
+	original.PendingRequirement.Prompt = "mutated-original"
+	if cloned.PendingRequirement.Origin != agent.RequirementOriginTool {
+		t.Fatalf("original mutation did not preserve cloned origin value: %s", cloned.PendingRequirement.Origin)
+	}
+	if cloned.PendingRequirement.Prompt != "mutated-clone" {
+		t.Fatalf("original mutation leaked into cloned prompt: %q", cloned.PendingRequirement.Prompt)
+	}
+}
+
 func mustMap(t *testing.T, value any) map[string]any {
 	t.Helper()
 

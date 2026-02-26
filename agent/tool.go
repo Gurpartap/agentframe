@@ -51,6 +51,7 @@ const (
 	ToolFailureReasonUnknownTool      ToolFailureReason = "unknown_tool"
 	ToolFailureReasonInvalidArguments ToolFailureReason = "invalid_arguments"
 	ToolFailureReasonExecutorError    ToolFailureReason = "executor_error"
+	ToolFailureReasonSuspended        ToolFailureReason = "suspended"
 )
 
 // ToolResultMessage converts a tool result to a transcript message.

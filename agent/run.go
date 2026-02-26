@@ -25,6 +25,14 @@ const (
 	RequirementKindExternalExecution RequirementKind = "external_execution"
 )
 
+// RequirementOrigin identifies where a pending requirement was created.
+type RequirementOrigin string
+
+const (
+	RequirementOriginModel RequirementOrigin = "model"
+	RequirementOriginTool  RequirementOrigin = "tool"
+)
+
 // ResolutionOutcome captures how a pending requirement was resolved.
 type ResolutionOutcome string
 
@@ -37,9 +45,10 @@ const (
 
 // PendingRequirement describes the requirement that currently blocks run progress.
 type PendingRequirement struct {
-	ID     string          `json:"id"`
-	Kind   RequirementKind `json:"kind"`
-	Prompt string          `json:"prompt,omitempty"`
+	ID     string            `json:"id"`
+	Kind   RequirementKind   `json:"kind"`
+	Origin RequirementOrigin `json:"origin"`
+	Prompt string            `json:"prompt,omitempty"`
 }
 
 // Resolution provides the typed payload required to continue a suspended run.
