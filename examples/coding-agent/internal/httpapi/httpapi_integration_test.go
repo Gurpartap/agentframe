@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/config"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/httpapi"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policyauth"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policylimit"
@@ -394,7 +395,10 @@ func newTestServer(t *testing.T) *httptest.Server {
 func newTestServerWithPolicy(t *testing.T, policy httpapi.PolicyConfig) *httptest.Server {
 	t.Helper()
 
-	runtime, err := runtimewire.New()
+	cfg := config.Default()
+	cfg.ModelMode = config.ModelModeMock
+
+	runtime, err := runtimewire.New(cfg)
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/config"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runtimewire"
 )
 
@@ -131,7 +132,7 @@ func TestRepeatedContinueDeterminism(t *testing.T) {
 func newRuntime(t *testing.T) *runtimewire.Runtime {
 	t.Helper()
 
-	rt, err := runtimewire.New()
+	rt, err := runtimewire.New(config.Default())
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}

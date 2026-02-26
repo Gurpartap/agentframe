@@ -28,8 +28,11 @@ func New(cfg config.Config) (*App, error) {
 	if cfg.ShutdownTimeout <= 0 {
 		return nil, errors.New("new app: shutdown timeout must be > 0")
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("new app config: %w", err)
+	}
 
-	runtime, err := runtimewire.New()
+	runtime, err := runtimewire.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("new app runtime: %w", err)
 	}

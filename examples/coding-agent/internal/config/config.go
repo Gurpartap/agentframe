@@ -1,28 +1,43 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
 const (
 	defaultHTTPAddr        = "127.0.0.1:8080"
 	defaultShutdownTimeout = 5 * time.Second
+	defaultModelMode       = ModelModeMock
+	defaultProviderBaseURL = "https://api.openai.com/v1"
+	defaultProviderModel   = "gpt-4.1-mini"
+	defaultProviderTimeout = 30 * time.Second
+)
+
+type ModelMode string
+
+const (
+	ModelModeMock     ModelMode = "mock"
+	ModelModeProvider ModelMode = "provider"
 )
 
 // Config controls HTTP boot and shutdown behavior.
 type Config struct {
 	HTTPAddr        string
 	ShutdownTimeout time.Duration
+	ModelMode       ModelMode
+	ProviderAPIKey  string
+	ProviderModel   string
+	ProviderBaseURL string
+	ProviderTimeout time.Duration
 }
 
 // Load reads runtime configuration from environment variables.
 func Load() (Config, error) {
-	cfg := Config{
-		HTTPAddr:        defaultHTTPAddr,
-		ShutdownTimeout: defaultShutdownTimeout,
-	}
+	cfg := Default()
 
 	if addr := os.Getenv("CODING_AGENT_HTTP_ADDR"); addr != "" {
 		cfg.HTTPAddr = addr
@@ -39,5 +54,71 @@ func Load() (Config, error) {
 		cfg.ShutdownTimeout = parsed
 	}
 
+	if mode := strings.TrimSpace(os.Getenv("CODING_AGENT_MODEL_MODE")); mode != "" {
+		cfg.ModelMode = ModelMode(mode)
+	}
+	if key := strings.TrimSpace(os.Getenv("CODING_AGENT_PROVIDER_API_KEY")); key != "" {
+		cfg.ProviderAPIKey = key
+	}
+	if model := strings.TrimSpace(os.Getenv("CODING_AGENT_PROVIDER_MODEL")); model != "" {
+		cfg.ProviderModel = model
+	}
+	if baseURL := strings.TrimSpace(os.Getenv("CODING_AGENT_PROVIDER_BASE_URL")); baseURL != "" {
+		cfg.ProviderBaseURL = baseURL
+	}
+	if timeout := strings.TrimSpace(os.Getenv("CODING_AGENT_PROVIDER_TIMEOUT")); timeout != "" {
+		parsed, err := time.ParseDuration(timeout)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse CODING_AGENT_PROVIDER_TIMEOUT: %w", err)
+		}
+		if parsed <= 0 {
+			return Config{}, fmt.Errorf("parse CODING_AGENT_PROVIDER_TIMEOUT: value must be > 0")
+		}
+		cfg.ProviderTimeout = parsed
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+
 	return cfg, nil
+}
+
+func Default() Config {
+	return Config{
+		HTTPAddr:        defaultHTTPAddr,
+		ShutdownTimeout: defaultShutdownTimeout,
+		ModelMode:       defaultModelMode,
+		ProviderModel:   defaultProviderModel,
+		ProviderBaseURL: defaultProviderBaseURL,
+		ProviderTimeout: defaultProviderTimeout,
+	}
+}
+
+func (c Config) Validate() error {
+	switch c.ModelMode {
+	case ModelModeMock:
+		return nil
+	case ModelModeProvider:
+		if strings.TrimSpace(c.ProviderAPIKey) == "" {
+			return errors.New("validate config: provider mode requires CODING_AGENT_PROVIDER_API_KEY")
+		}
+		if strings.TrimSpace(c.ProviderModel) == "" {
+			return errors.New("validate config: provider mode requires CODING_AGENT_PROVIDER_MODEL")
+		}
+		if strings.TrimSpace(c.ProviderBaseURL) == "" {
+			return errors.New("validate config: provider mode requires CODING_AGENT_PROVIDER_BASE_URL")
+		}
+		if c.ProviderTimeout <= 0 {
+			return errors.New("validate config: provider mode requires CODING_AGENT_PROVIDER_TIMEOUT > 0")
+		}
+		return nil
+	default:
+		return fmt.Errorf(
+			"validate config: unsupported CODING_AGENT_MODEL_MODE %q (allowed: %q, %q)",
+			c.ModelMode,
+			ModelModeMock,
+			ModelModeProvider,
+		)
+	}
 }

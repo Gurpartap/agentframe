@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/Gurpartap/agentframe/agent"
@@ -11,6 +12,8 @@ import (
 	eventinginmem "github.com/Gurpartap/agentframe/eventing/inmem"
 	runstoreinmem "github.com/Gurpartap/agentframe/runstore/inmem"
 
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/config"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/modelopenai"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runstream"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runtimewire/mocks"
 )
@@ -24,13 +27,20 @@ type Runtime struct {
 	ToolDefinitions []agent.ToolDefinition
 }
 
-func New() (*Runtime, error) {
+func New(cfg config.Config) (*Runtime, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("new runtime config: %w", err)
+	}
+
 	store := runstoreinmem.New()
 	events := eventinginmem.New()
 	streamBroker := runstream.New(runstream.DefaultHistoryLimit)
 	fanout := newFanoutSink(events, streamBroker)
 
-	model := mocks.NewModel()
+	model, err := buildModel(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("new runtime model: %w", err)
+	}
 	tools := mocks.NewTools()
 	loop, err := agentreact.New(model, tools, fanout)
 	if err != nil {
@@ -54,6 +64,27 @@ func New() (*Runtime, error) {
 		StreamBroker:    streamBroker,
 		ToolDefinitions: mocks.Definitions(),
 	}, nil
+}
+
+func buildModel(cfg config.Config) (agentreact.Model, error) {
+	switch cfg.ModelMode {
+	case config.ModelModeMock:
+		return mocks.NewModel(), nil
+	case config.ModelModeProvider:
+		httpClient := &http.Client{Timeout: cfg.ProviderTimeout}
+		providerModel, err := modelopenai.New(modelopenai.Config{
+			APIKey:     cfg.ProviderAPIKey,
+			Model:      cfg.ProviderModel,
+			BaseURL:    cfg.ProviderBaseURL,
+			HTTPClient: httpClient,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return providerModel, nil
+	default:
+		return nil, fmt.Errorf("unsupported model mode %q", cfg.ModelMode)
+	}
 }
 
 type fanoutSink struct {
