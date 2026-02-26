@@ -149,6 +149,150 @@ func TestExecuteChatSlashAndFreeTextFlow(t *testing.T) {
 	}
 }
 
+func TestExecuteChatSuspendedResolutionFlow(t *testing.T) {
+	t.Parallel()
+
+	type runStateResponse struct {
+		RunID              string `json:"run_id"`
+		Status             string `json:"status"`
+		Step               int    `json:"step"`
+		Version            int64  `json:"version"`
+		Output             string `json:"output,omitempty"`
+		PendingRequirement *struct {
+			ID     string `json:"id"`
+			Kind   string `json:"kind"`
+			Prompt string `json:"prompt"`
+		} `json:"pending_requirement,omitempty"`
+	}
+
+	var (
+		mu                  sync.Mutex
+		continueCallCount   int
+		capturedRequirement map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeRunState := func(payload runStateResponse) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(payload)
+		}
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/start":
+			writeRunState(runStateResponse{
+				RunID:   "run-suspended",
+				Status:  "suspended",
+				Step:    1,
+				Version: 2,
+				PendingRequirement: &struct {
+					ID     string `json:"id"`
+					Kind   string `json:"kind"`
+					Prompt string `json:"prompt"`
+				}{
+					ID:     "req-approval",
+					Kind:   "approval",
+					Prompt: "approve deterministic continuation",
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run-suspended":
+			writeRunState(runStateResponse{
+				RunID:   "run-suspended",
+				Status:  "suspended",
+				Step:    1,
+				Version: 2,
+				PendingRequirement: &struct {
+					ID     string `json:"id"`
+					Kind   string `json:"kind"`
+					Prompt string `json:"prompt"`
+				}{
+					ID:     "req-approval",
+					Kind:   "approval",
+					Prompt: "approve deterministic continuation",
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run-suspended/events":
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			<-r.Context().Done()
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/run-suspended/continue":
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode continue request: %v", err)
+			}
+			mu.Lock()
+			continueCallCount++
+			if resolution, ok := request["resolution"].(map[string]any); ok {
+				capturedRequirement = resolution
+			}
+			mu.Unlock()
+			writeRunState(runStateResponse{
+				RunID:   "run-suspended",
+				Status:  "completed",
+				Step:    2,
+				Version: 3,
+				Output:  "done",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	inputReader := delayedInput(
+		[]string{
+			"/start [suspend] approval gate\n",
+			"/continue\n",
+			"\n",         // requirement_id default req-approval
+			"\n",         // kind default approval
+			"approved\n", // outcome
+			"\n",         // optional value
+			"/quit\n",
+		},
+		35*time.Millisecond,
+	)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeWithInput(
+		ctx,
+		[]string{"--base-url", server.URL, "--token", "chat-token", "chat"},
+		inputReader,
+		&stdout,
+		&stderr,
+	)
+	if err != nil {
+		t.Fatalf("execute chat suspended flow: %v stderr=%s", err, stderr.String())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if continueCallCount != 1 {
+		t.Fatalf("continue call count mismatch: got=%d want=%d", continueCallCount, 1)
+	}
+	if capturedRequirement == nil {
+		t.Fatalf("expected continue resolution payload")
+	}
+	if capturedRequirement["requirement_id"] != "req-approval" {
+		t.Fatalf("requirement_id mismatch: %#v", capturedRequirement["requirement_id"])
+	}
+	if capturedRequirement["kind"] != "approval" {
+		t.Fatalf("kind mismatch: %#v", capturedRequirement["kind"])
+	}
+	if capturedRequirement["outcome"] != "approved" {
+		t.Fatalf("outcome mismatch: %#v", capturedRequirement["outcome"])
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "run is suspended and requires a resolution payload") {
+		t.Fatalf("missing suspension guidance output: %q", output)
+	}
+	if !strings.Contains(output, "requirement_id [req-approval]:") {
+		t.Fatalf("missing requirement prompt output: %q", output)
+	}
+}
+
 func delayedInput(lines []string, delay time.Duration) io.Reader {
 	reader, writer := io.Pipe()
 	go func() {

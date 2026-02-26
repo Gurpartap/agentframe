@@ -281,3 +281,55 @@ func TestExecuteReturnsAPIError(t *testing.T) {
 		t.Fatalf("code mismatch: got=%q want=%q", requestError.Code, "unauthorized")
 	}
 }
+
+func TestExecuteContinueRejectsUnsupportedResolutionKind(t *testing.T) {
+	t.Parallel()
+
+	err := Execute(
+		context.Background(),
+		[]string{
+			"continue",
+			"run-000001",
+			"--requirement-id", "req-1",
+			"--kind", "unknown_kind",
+			"--outcome", "approved",
+		},
+		io.Discard,
+		io.Discard,
+	)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "continue resolution kind") {
+		t.Fatalf("expected kind validation context, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "unsupported requirement kind") {
+		t.Fatalf("expected unsupported kind message, got %q", err.Error())
+	}
+}
+
+func TestExecuteContinueRejectsUnsupportedResolutionOutcome(t *testing.T) {
+	t.Parallel()
+
+	err := Execute(
+		context.Background(),
+		[]string{
+			"continue",
+			"run-000001",
+			"--requirement-id", "req-1",
+			"--kind", "approval",
+			"--outcome", "unknown_outcome",
+		},
+		io.Discard,
+		io.Discard,
+	)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "continue resolution outcome") {
+		t.Fatalf("expected outcome validation context, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "unsupported resolution outcome") {
+		t.Fatalf("expected unsupported outcome message, got %q", err.Error())
+	}
+}

@@ -15,7 +15,7 @@ var ErrQuit = errors.New("quit chat")
 type Handlers struct {
 	Start    func(ctx context.Context, prompt string) error
 	Status   func(ctx context.Context) error
-	Continue func(ctx context.Context, maxSteps *int) error
+	Continue func(ctx context.Context, maxSteps *int, resolution *ResolutionInput) error
 	Steer    func(ctx context.Context, instruction string) error
 	FollowUp func(ctx context.Context, prompt string) error
 	Cancel   func(ctx context.Context) error
@@ -116,7 +116,21 @@ func (r *REPL) dispatch(ctx context.Context, line string) error {
 		if err != nil {
 			return err
 		}
-		return r.handlers.Continue(ctx, maxSteps)
+		continueErr := r.handlers.Continue(ctx, maxSteps, nil)
+		if continueErr == nil {
+			return nil
+		}
+
+		var resolutionRequiredErr *ResolutionRequiredError
+		if !errors.As(continueErr, &resolutionRequiredErr) {
+			return continueErr
+		}
+
+		resolution, err := PromptResolution(ctx, r.in, r.renderer, resolutionRequiredErr.Defaults())
+		if err != nil {
+			return err
+		}
+		return r.handlers.Continue(ctx, maxSteps, resolution)
 	case "steer":
 		if args == "" {
 			return errors.New("/steer requires instruction text")

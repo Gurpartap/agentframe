@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/clientapi"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/clientchat"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/clientconfig"
 )
 
@@ -27,6 +28,10 @@ Commands:
   steer <run-id> --instruction <text>
   follow-up <run-id> --prompt <text> [--max-steps <n>]
   cancel <run-id>
+
+Continue Resolution Examples:
+  continue run-000001 --requirement-id req-approval --kind approval --outcome approved
+  continue run-000001 --max-steps 2 --requirement-id req-user-input --kind user_input --outcome provided --value "operator note"
 
 Global flags:
   --base-url <url>
@@ -224,10 +229,18 @@ func runContinue(ctx context.Context, api *clientapi.Client, jsonMode bool, args
 		if strings.TrimSpace(*requirementID) == "" || strings.TrimSpace(*kind) == "" || strings.TrimSpace(*outcome) == "" {
 			return errors.New("continue resolution requires --requirement-id, --kind, and --outcome")
 		}
+		normalizedKind := strings.TrimSpace(*kind)
+		if err := clientchat.ValidateRequirementKind(normalizedKind); err != nil {
+			return fmt.Errorf("continue resolution kind: %w", err)
+		}
+		normalizedOutcome := strings.TrimSpace(*outcome)
+		if err := clientchat.ValidateResolutionOutcome(normalizedOutcome); err != nil {
+			return fmt.Errorf("continue resolution outcome: %w", err)
+		}
 		request.Resolution = &clientapi.Resolution{
 			RequirementID: strings.TrimSpace(*requirementID),
-			Kind:          strings.TrimSpace(*kind),
-			Outcome:       strings.TrimSpace(*outcome),
+			Kind:          normalizedKind,
+			Outcome:       normalizedOutcome,
 			Value:         *value,
 		}
 	}

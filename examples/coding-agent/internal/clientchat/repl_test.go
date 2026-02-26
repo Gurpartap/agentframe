@@ -5,6 +5,7 @@ import (
 	"context"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -35,7 +36,7 @@ func TestREPLSlashCommandsAndFreeText(t *testing.T) {
 			called = append(called, "status")
 			return nil
 		},
-		Continue: func(_ context.Context, maxSteps *int) error {
+		Continue: func(_ context.Context, maxSteps *int, _ *ResolutionInput) error {
 			if maxSteps == nil {
 				called = append(called, "continue:nil")
 				return nil
@@ -89,5 +90,70 @@ func TestREPLInvalidCommandPrintsErrorAndContinues(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("error: unsupported command")) {
 		t.Fatalf("expected error output, got %q", out.String())
+	}
+}
+
+func TestREPLContinueResolutionPromptFlow(t *testing.T) {
+	t.Parallel()
+
+	input := bytes.NewBufferString(
+		"/continue\n" +
+			"\n" +
+			"\n" +
+			"approved\n" +
+			"manual confirmation\n" +
+			"/quit\n",
+	)
+
+	var out bytes.Buffer
+	renderer := NewRenderer(&out, "chat> ")
+
+	calls := 0
+	repl := NewREPL(input, renderer, Handlers{
+		Continue: func(_ context.Context, maxSteps *int, resolution *ResolutionInput) error {
+			calls++
+			if calls == 1 {
+				if maxSteps != nil {
+					t.Fatalf("expected nil max steps in first continue call, got %v", *maxSteps)
+				}
+				return NewResolutionRequiredError(ResolutionPromptDefaults{
+					RequirementID: "req-approval",
+					Kind:          "approval",
+					Prompt:        "approve deterministic continuation",
+				})
+			}
+
+			if resolution == nil {
+				t.Fatalf("expected prompted resolution payload on second continue call")
+			}
+			if resolution.RequirementID != "req-approval" {
+				t.Fatalf("requirement_id mismatch: got=%q want=%q", resolution.RequirementID, "req-approval")
+			}
+			if resolution.Kind != "approval" {
+				t.Fatalf("kind mismatch: got=%q want=%q", resolution.Kind, "approval")
+			}
+			if resolution.Outcome != "approved" {
+				t.Fatalf("outcome mismatch: got=%q want=%q", resolution.Outcome, "approved")
+			}
+			if resolution.Value != "manual confirmation" {
+				t.Fatalf("value mismatch: got=%q want=%q", resolution.Value, "manual confirmation")
+			}
+			return nil
+		},
+	})
+
+	if err := repl.Run(context.Background()); err != nil {
+		t.Fatalf("run repl: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("continue call count mismatch: got=%d want=%d", calls, 2)
+	}
+
+	rendered := out.String()
+	if !strings.Contains(rendered, "run is suspended and requires a resolution payload") {
+		t.Fatalf("missing resolution guidance output: %q", rendered)
+	}
+	if !strings.Contains(rendered, "outcome (approved|rejected|provided|completed):") {
+		t.Fatalf("missing explicit outcome prompt: %q", rendered)
 	}
 }

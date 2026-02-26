@@ -92,13 +92,40 @@ func (c *chatController) status(ctx context.Context) error {
 	return writeRunState(c.rendererWriter(), state)
 }
 
-func (c *chatController) continueRun(ctx context.Context, maxSteps *int) error {
+func (c *chatController) continueRun(ctx context.Context, maxSteps *int, resolution *clientchat.ResolutionInput) error {
 	runID, _, ok := c.state.ActiveRun()
 	if !ok {
 		return errors.New("no active run; use /start first")
 	}
 
-	state, _, err := c.api.Continue(ctx, runID, clientapi.ContinueRequest{MaxSteps: maxSteps})
+	if resolution == nil {
+		current, _, err := c.api.Get(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if current.Status == "suspended" {
+			if current.PendingRequirement == nil {
+				return errors.New("run is suspended and requires a typed resolution")
+			}
+			return clientchat.NewResolutionRequiredError(clientchat.ResolutionPromptDefaults{
+				RequirementID: current.PendingRequirement.ID,
+				Kind:          current.PendingRequirement.Kind,
+				Prompt:        current.PendingRequirement.Prompt,
+			})
+		}
+	}
+
+	request := clientapi.ContinueRequest{MaxSteps: maxSteps}
+	if resolution != nil {
+		request.Resolution = &clientapi.Resolution{
+			RequirementID: strings.TrimSpace(resolution.RequirementID),
+			Kind:          strings.TrimSpace(resolution.Kind),
+			Outcome:       strings.TrimSpace(resolution.Outcome),
+			Value:         resolution.Value,
+		}
+	}
+
+	state, _, err := c.api.Continue(ctx, runID, request)
 	if err != nil {
 		return err
 	}
