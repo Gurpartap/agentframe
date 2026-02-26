@@ -95,7 +95,7 @@ curl -sS -X POST "$BASE/v1/runs/start" \
 
 ## Verify
 
-From `examples/coding-agent`:
+From `examples/coding-agent/server`:
 
 ```bash
 go test ./...

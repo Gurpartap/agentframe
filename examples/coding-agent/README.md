@@ -9,13 +9,3 @@
 
 - Server guide: [server/README.md](./server/README.md)
 - Client guide: [client/README.md](./client/README.md)
-
-## Verify
-
-From `examples/coding-agent`:
-
-```bash
-go test ./...
-go build ./...
-go vet ./...
-```

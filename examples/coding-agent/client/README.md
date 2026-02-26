@@ -129,3 +129,13 @@ go run ./cmd/client cancel run-000001
 - `continue resolution outcome: unsupported resolution outcome ...`: use one of `approved`, `rejected`, `provided`, `completed`.
 - `events stream rejected ... code=conflict message=cursor expired`: reconnect with a newer cursor or restart from `--cursor 0`.
 - Unauthorized errors on mutating commands: check `--token` and server auth policy.
+
+## Verify
+
+From `examples/coding-agent/client`:
+
+```bash
+go test ./...
+go build ./...
+go vet ./...
+```
