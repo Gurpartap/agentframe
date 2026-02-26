@@ -264,17 +264,19 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 						next.Step++
 						next.Status = agent.RunStatusSuspended
 						next.PendingRequirement = &agent.PendingRequirement{
-							ID:     "req-tool",
-							Kind:   agent.RequirementKindUserInput,
-							Origin: agent.RequirementOriginTool,
+							ID:         "req-tool",
+							Kind:       agent.RequirementKindUserInput,
+							Origin:     agent.RequirementOriginTool,
+							ToolCallID: "call-required",
 						}
 						next.Messages = append(next.Messages, agent.Message{
 							Role:    agent.RoleAssistant,
 							Content: "still no tool observation",
-							Requirement: &agent.PendingRequirement{
-								ID:     "req-tool",
-								Kind:   agent.RequirementKindUserInput,
-								Origin: agent.RequirementOriginTool,
+							ToolCalls: []agent.ToolCall{
+								{
+									ID:   "call-required",
+									Name: "lookup",
+								},
 							},
 						})
 						return next, nil
@@ -313,11 +315,11 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 			},
 		},
 		{
-			name: "start_suspended_tool_origin_rejects_unlinked_tool_observation",
+			name: "start_suspended_tool_origin_rejects_linked_but_unrelated_tool_evidence",
 			run: func(t *testing.T) {
 				t.Parallel()
 
-				const runID = agent.RunID("contract-start-tool-origin-unlinked-tool-observation")
+				const runID = agent.RunID("contract-start-tool-origin-unrelated-tool-evidence")
 				events := eventinginmem.New()
 				store := runstoreinmem.New()
 				engine := &engineSpy{
@@ -326,15 +328,26 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 						next.Step++
 						next.Status = agent.RunStatusSuspended
 						next.PendingRequirement = &agent.PendingRequirement{
-							ID:     "req-tool-unlinked",
-							Kind:   agent.RequirementKindUserInput,
-							Origin: agent.RequirementOriginTool,
+							ID:         "req-tool-unrelated",
+							Kind:       agent.RequirementKindUserInput,
+							Origin:     agent.RequirementOriginTool,
+							ToolCallID: "call-required",
 						}
+						next.Messages = append(next.Messages, agent.Message{
+							Role:    agent.RoleAssistant,
+							Content: "issued different tool call",
+							ToolCalls: []agent.ToolCall{
+								{
+									ID:   "call-other",
+									Name: "lookup",
+								},
+							},
+						})
 						next.Messages = append(next.Messages, agent.Message{
 							Role:       agent.RoleTool,
 							Name:       "lookup",
-							ToolCallID: "call-unlinked",
-							Content:    "synthetic observation",
+							ToolCallID: "call-other",
+							Content:    "observation tied to unrelated call",
 						})
 						return next, nil
 					},
@@ -369,6 +382,73 @@ func TestRunnerDispatch_EngineOutputContractViolations(t *testing.T) {
 					t.Fatalf("persisted state changed: got=%+v want=%+v", persisted, want)
 				}
 				assertNoCheckpointOrCommandAppliedEvents(t, events.Events())
+			},
+		},
+		{
+			name: "continue_suspended_tool_origin_accepts_prefix_assistant_tool_call_and_delta_observation",
+			run: func(t *testing.T) {
+				t.Parallel()
+
+				const runID = agent.RunID("contract-continue-tool-origin-prefix-link")
+				events := eventinginmem.New()
+				store := runstoreinmem.New()
+				initial := agent.RunState{
+					ID:     runID,
+					Status: agent.RunStatusPending,
+					Step:   1,
+					Messages: []agent.Message{
+						{Role: agent.RoleUser, Content: "start"},
+						{
+							Role:    agent.RoleAssistant,
+							Content: "calling tool",
+							ToolCalls: []agent.ToolCall{
+								{
+									ID:   "call-prefix",
+									Name: "lookup",
+								},
+							},
+						},
+					},
+				}
+				if err := store.Save(context.Background(), initial); err != nil {
+					t.Fatalf("seed store: %v", err)
+				}
+
+				engine := &engineSpy{
+					executeFn: func(_ context.Context, state agent.RunState, _ agent.EngineInput) (agent.RunState, error) {
+						next := state
+						next.Step++
+						next.Status = agent.RunStatusSuspended
+						next.PendingRequirement = &agent.PendingRequirement{
+							ID:         "req-tool-prefix",
+							Kind:       agent.RequirementKindUserInput,
+							Origin:     agent.RequirementOriginTool,
+							ToolCallID: "call-prefix",
+						}
+						next.Messages = append(next.Messages, agent.Message{
+							Role:       agent.RoleTool,
+							Name:       "lookup",
+							ToolCallID: "call-prefix",
+							Content:    "need user input",
+						})
+						return next, nil
+					},
+				}
+				runner := newDispatchRunnerWithEngine(t, store, events, engine)
+
+				result, err := runner.Continue(context.Background(), runID, 3, nil, nil)
+				if err != nil {
+					t.Fatalf("continue returned error: %v", err)
+				}
+				if result.State.Status != agent.RunStatusSuspended {
+					t.Fatalf("unexpected status: got=%s want=%s", result.State.Status, agent.RunStatusSuspended)
+				}
+				if result.State.PendingRequirement == nil {
+					t.Fatalf("expected pending requirement")
+				}
+				if result.State.PendingRequirement.ToolCallID != "call-prefix" {
+					t.Fatalf("unexpected pending requirement tool call id: %q", result.State.PendingRequirement.ToolCallID)
+				}
 			},
 		},
 	}

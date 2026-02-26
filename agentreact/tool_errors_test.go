@@ -475,6 +475,9 @@ func TestToolFailure_SuspendedReasonNormalization(t *testing.T) {
 	if result.State.PendingRequirement.Origin != agent.RequirementOriginTool {
 		t.Fatalf("unexpected requirement origin: %s", result.State.PendingRequirement.Origin)
 	}
+	if result.State.PendingRequirement.ToolCallID != "call-1" {
+		t.Fatalf("unexpected requirement tool call id: %q", result.State.PendingRequirement.ToolCallID)
+	}
 
 	toolResult := mustToolResultEvent(t, events.Events())
 	if !toolResult.IsError {
@@ -544,6 +547,14 @@ func TestToolFailure_InvalidSuspendRequestUsesExecutorError(t *testing.T) {
 	}
 	if result.State.Messages[2].Role != agent.RoleTool || !strings.Contains(result.State.Messages[2].Content, string(agent.ToolFailureReasonExecutorError)) {
 		t.Fatalf("unexpected transcript tool message: %+v", result.State.Messages[2])
+	}
+	runFailedEvent := mustSingleRunFailedEvent(t, events.Events())
+	wantDescription := "run failed: " + result.State.Error
+	if runFailedEvent.Description != wantDescription {
+		t.Fatalf("unexpected run failed description: got=%q want=%q", runFailedEvent.Description, wantDescription)
+	}
+	if strings.Contains(runFailedEvent.Description, "model error:") {
+		t.Fatalf("run failed description must remain source-neutral: %q", runFailedEvent.Description)
 	}
 }
 

@@ -64,6 +64,13 @@ func validatePendingRequirementContract(requirement *PendingRequirement) error {
 			requirement.Origin,
 		)
 	}
+	if requirement.Origin == RequirementOriginTool && requirement.ToolCallID == "" {
+		return fmt.Errorf(
+			"%w: field=pending_requirement.tool_call_id reason=empty_for_origin origin=%s",
+			ErrRunStateInvalid,
+			requirement.Origin,
+		)
+	}
 	return nil
 }
 

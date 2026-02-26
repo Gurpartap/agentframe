@@ -947,15 +947,35 @@ func TestConformance_RunSuspendsWhenModelEmitsRequirementWithOrigin(t *testing.T
 	}
 
 	gotEvents := events.Events()
-	assertEventSubsequence(t, gotEvents, []eventExpectation{
-		{Type: agent.EventTypeRunStarted, Step: 0, CheckStep: true},
-		{Type: agent.EventTypeAssistantMessage, Step: 1, CheckStep: true},
-		{Type: agent.EventTypeRunSuspended, Step: 1, CheckStep: true},
-		{Type: agent.EventTypeCommandApplied, Step: 1, CheckStep: true, CommandKind: agent.CommandKindStart},
-		{Type: agent.EventTypeAssistantMessage, Step: 2, CheckStep: true},
-		{Type: agent.EventTypeRunCompleted, Step: 2, CheckStep: true},
-		{Type: agent.EventTypeCommandApplied, Step: 2, CheckStep: true, CommandKind: agent.CommandKindContinue},
-	})
+	wantTypes := []agent.EventType{
+		agent.EventTypeRunStarted,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunSuspended,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+		agent.EventTypeAssistantMessage,
+		agent.EventTypeRunCompleted,
+		agent.EventTypeRunCheckpoint,
+		agent.EventTypeCommandApplied,
+	}
+	wantSteps := []int{0, 1, 1, 1, 1, 2, 2, 2, 2}
+	if len(gotEvents) != len(wantTypes) {
+		t.Fatalf("unexpected event count: got=%d want=%d", len(gotEvents), len(wantTypes))
+	}
+	for i := range wantTypes {
+		if gotEvents[i].Type != wantTypes[i] {
+			t.Fatalf("event[%d] type mismatch: got=%s want=%s", i, gotEvents[i].Type, wantTypes[i])
+		}
+		if gotEvents[i].Step != wantSteps[i] {
+			t.Fatalf("event[%d] step mismatch: got=%d want=%d", i, gotEvents[i].Step, wantSteps[i])
+		}
+	}
+	if gotEvents[4].CommandKind != agent.CommandKindStart {
+		t.Fatalf("unexpected start command kind: got=%s want=%s", gotEvents[4].CommandKind, agent.CommandKindStart)
+	}
+	if gotEvents[8].CommandKind != agent.CommandKindContinue {
+		t.Fatalf("unexpected continue command kind: got=%s want=%s", gotEvents[8].CommandKind, agent.CommandKindContinue)
+	}
 }
 
 func TestConformance_ModelRequirementMissingOriginFailsRun(t *testing.T) {
@@ -1141,6 +1161,9 @@ func TestConformance_RunSuspendsWhenToolExecutorRequestsSuspension(t *testing.T)
 	}
 	if result.State.PendingRequirement.Origin != agent.RequirementOriginTool {
 		t.Fatalf("unexpected requirement origin: %s", result.State.PendingRequirement.Origin)
+	}
+	if result.State.PendingRequirement.ToolCallID != "call-1" {
+		t.Fatalf("unexpected requirement tool call id: %q", result.State.PendingRequirement.ToolCallID)
 	}
 	if countEventType(events.Events(), agent.EventTypeRunSuspended) != 1 {
 		t.Fatalf("expected single run_suspended event")
@@ -1457,6 +1480,12 @@ func TestConformance_ContinueFromToolSuspensionRequiresResolution(t *testing.T) 
 	if runResult.State.Status != agent.RunStatusSuspended {
 		t.Fatalf("unexpected status: %s", runResult.State.Status)
 	}
+	if runResult.State.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement")
+	}
+	if runResult.State.PendingRequirement.ToolCallID != "call-1" {
+		t.Fatalf("unexpected requirement tool call id: %q", runResult.State.PendingRequirement.ToolCallID)
+	}
 	persistedBeforeContinue, err := store.Load(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("load before continue: %v", err)
@@ -1539,6 +1568,12 @@ func TestConformance_ContinueFromToolSuspensionWithMatchingResolution(t *testing
 	}
 	if runResult.State.Status != agent.RunStatusSuspended {
 		t.Fatalf("unexpected status: %s", runResult.State.Status)
+	}
+	if runResult.State.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement")
+	}
+	if runResult.State.PendingRequirement.ToolCallID != "call-1" {
+		t.Fatalf("unexpected requirement tool call id: %q", runResult.State.PendingRequirement.ToolCallID)
 	}
 	prefix := agent.CloneMessages(runResult.State.Messages)
 
@@ -1751,50 +1786,6 @@ func TestConformance_ToolSuspendRequestWithModelOriginFailsDeterministically(t *
 	if countEventType(events.Events(), agent.EventTypeRunFailed) != 1 {
 		t.Fatalf("expected one run_failed event")
 	}
-}
-
-type eventExpectation struct {
-	Type        agent.EventType
-	Step        int
-	CheckStep   bool
-	CommandKind agent.CommandKind
-}
-
-func assertEventSubsequence(t *testing.T, events []agent.Event, want []eventExpectation) {
-	t.Helper()
-
-	if len(want) == 0 {
-		return
-	}
-
-	index := 0
-	for _, event := range events {
-		current := want[index]
-		if event.Type != current.Type {
-			continue
-		}
-		if current.CheckStep && event.Step != current.Step {
-			continue
-		}
-		if current.CommandKind != "" && event.CommandKind != current.CommandKind {
-			continue
-		}
-		index++
-		if index == len(want) {
-			return
-		}
-	}
-
-	missing := want[index]
-	if missing.CheckStep {
-		t.Fatalf(
-			"missing event subsequence element: type=%s step=%d command_kind=%s",
-			missing.Type,
-			missing.Step,
-			missing.CommandKind,
-		)
-	}
-	t.Fatalf("missing event subsequence element: type=%s command_kind=%s", missing.Type, missing.CommandKind)
 }
 
 func countEventType(events []agent.Event, want agent.EventType) int {

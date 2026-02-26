@@ -49,6 +49,21 @@ func TestValidateRunStateMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "valid suspended with tool-origin requirement linkage",
+			state: agent.RunState{
+				ID:      "run-valid-suspended-tool-origin",
+				Version: 2,
+				Step:    3,
+				Status:  agent.RunStatusSuspended,
+				PendingRequirement: &agent.PendingRequirement{
+					ID:         "req-tool",
+					Kind:       agent.RequirementKindUserInput,
+					Origin:     agent.RequirementOriginTool,
+					ToolCallID: "call-1",
+				},
+			},
+		},
+		{
 			name: "empty id",
 			state: agent.RunState{
 				ID:      "",
@@ -106,6 +121,21 @@ func TestValidateRunStateMatrix(t *testing.T) {
 				Version: 0,
 				Step:    0,
 				Status:  agent.RunStatusSuspended,
+			},
+			wantErr: true,
+		},
+		{
+			name: "suspended tool-origin requirement missing linkage",
+			state: agent.RunState{
+				ID:      "run-suspended-tool-missing-linkage",
+				Version: 0,
+				Step:    0,
+				Status:  agent.RunStatusSuspended,
+				PendingRequirement: &agent.PendingRequirement{
+					ID:     "req-tool",
+					Kind:   agent.RequirementKindUserInput,
+					Origin: agent.RequirementOriginTool,
+				},
 			},
 			wantErr: true,
 		},

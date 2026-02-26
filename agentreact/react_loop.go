@@ -194,6 +194,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 			}
 			result := agent.ToolResult{}
 			var suspendRequestErr *agent.SuspendRequestError
+			var suspendRequirement *agent.PendingRequirement
 			var invalidSuspendErr error
 			switch {
 			case !defined:
@@ -215,7 +216,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 						return l.cancelRun(ctx, state, cancellationErr, eventErr)
 					}
 					if errors.As(toolErr, &suspendRequestErr) {
-						invalidSuspendErr = validateToolSuspendRequest(&state, suspendRequestErr)
+						suspendRequirement, invalidSuspendErr = validateToolSuspendRequest(&state, toolCall, suspendRequestErr)
 						if invalidSuspendErr != nil {
 							result = normalizedToolErrorResult(toolCall, agent.ToolFailureReasonExecutorError, invalidSuspendErr)
 						} else {
@@ -251,8 +252,7 @@ func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input age
 				return l.failRun(ctx, state, invalidSuspendErr, eventErr)
 			}
 			if suspendRequestErr != nil {
-				requirementCopy := *suspendRequestErr.Requirement
-				state.PendingRequirement = &requirementCopy
+				state.PendingRequirement = suspendRequirement
 				if err := agent.TransitionRunStatus(&state, agent.RunStatusSuspended); err != nil {
 					state.PendingRequirement = nil
 					return l.failRun(ctx, state, err, eventErr)
@@ -317,22 +317,39 @@ func validateModelRequirement(state *agent.RunState, requirement *agent.PendingR
 	return validateRequirementContract(state, requirement)
 }
 
-func validateToolSuspendRequest(state *agent.RunState, request *agent.SuspendRequestError) error {
+func validateToolSuspendRequest(
+	state *agent.RunState,
+	call agent.ToolCall,
+	request *agent.SuspendRequestError,
+) (*agent.PendingRequirement, error) {
 	if request == nil || request.Requirement == nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"%w: field=pending_requirement reason=nil source=tool",
 			agent.ErrRunStateInvalid,
 		)
 	}
-	if request.Requirement.Origin != agent.RequirementOriginTool {
-		return fmt.Errorf(
+	requirementCopy := *request.Requirement
+	if requirementCopy.Origin != agent.RequirementOriginTool {
+		return nil, fmt.Errorf(
 			"%w: field=pending_requirement.origin reason=invalid_for_source source=tool value=%q want=%q",
 			agent.ErrRunStateInvalid,
-			request.Requirement.Origin,
+			requirementCopy.Origin,
 			agent.RequirementOriginTool,
 		)
 	}
-	return validateRequirementContract(state, request.Requirement)
+	if requirementCopy.ToolCallID != "" && requirementCopy.ToolCallID != call.ID {
+		return nil, fmt.Errorf(
+			"%w: field=pending_requirement.tool_call_id reason=mismatch source=tool value=%q want=%q",
+			agent.ErrRunStateInvalid,
+			requirementCopy.ToolCallID,
+			call.ID,
+		)
+	}
+	requirementCopy.ToolCallID = call.ID
+	if err := validateRequirementContract(state, &requirementCopy); err != nil {
+		return nil, err
+	}
+	return &requirementCopy, nil
 }
 
 func validateRequirementContract(state *agent.RunState, requirement *agent.PendingRequirement) error {

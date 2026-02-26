@@ -180,12 +180,23 @@ func validateSuspendedRequirementProvenance(prev RunState, next RunState) error 
 			)
 		}
 	case RequirementOriginTool:
-		if !hasLinkedToolObservation(additions) {
+		if !hasToolObservationForCallID(additions, next.PendingRequirement.ToolCallID) {
 			return fmt.Errorf(
-				"%w: invariant=suspension_origin_provenance reason=missing_linked_tool_observation origin=%s requirement_id=%q run_id=%q",
+				"%w: invariant=suspension_origin_provenance reason=missing_linked_tool_observation origin=%s requirement_id=%q tool_call_id=%q run_id=%q",
 				ErrEngineOutputContractViolation,
 				next.PendingRequirement.Origin,
 				next.PendingRequirement.ID,
+				next.PendingRequirement.ToolCallID,
+				next.ID,
+			)
+		}
+		if !hasAssistantToolCallForCallID(next.Messages, next.PendingRequirement.ToolCallID) {
+			return fmt.Errorf(
+				"%w: invariant=suspension_origin_provenance reason=missing_assistant_tool_call origin=%s requirement_id=%q tool_call_id=%q run_id=%q",
+				ErrEngineOutputContractViolation,
+				next.PendingRequirement.Origin,
+				next.PendingRequirement.ID,
+				next.PendingRequirement.ToolCallID,
 				next.ID,
 			)
 		}
@@ -217,29 +228,30 @@ func hasMatchingAssistantRequirement(messages []Message, requirement *PendingReq
 	return false
 }
 
-func hasLinkedToolObservation(messages []Message) bool {
-	assistantCallsByID := make(map[string]string)
+func hasToolObservationForCallID(messages []Message, toolCallID string) bool {
+	if toolCallID == "" {
+		return false
+	}
 	for _, message := range messages {
-		switch message.Role {
-		case RoleAssistant:
-			for _, toolCall := range message.ToolCalls {
-				if toolCall.ID == "" {
-					continue
-				}
-				assistantCallsByID[toolCall.ID] = toolCall.Name
-			}
-		case RoleTool:
-			if message.ToolCallID == "" {
-				continue
-			}
-			toolName, exists := assistantCallsByID[message.ToolCallID]
-			if !exists {
-				continue
-			}
-			if message.Name != "" && toolName != "" && message.Name != toolName {
-				continue
-			}
+		if message.Role == RoleTool && message.ToolCallID == toolCallID {
 			return true
+		}
+	}
+	return false
+}
+
+func hasAssistantToolCallForCallID(messages []Message, toolCallID string) bool {
+	if toolCallID == "" {
+		return false
+	}
+	for _, message := range messages {
+		if message.Role != RoleAssistant {
+			continue
+		}
+		for _, toolCall := range message.ToolCalls {
+			if toolCall.ID == toolCallID {
+				return true
+			}
 		}
 	}
 	return false
