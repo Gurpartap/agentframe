@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/config"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/httpapi"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runtimewire"
 )
 
@@ -38,9 +39,11 @@ func New(cfg config.Config) (*App, error) {
 		runtime: runtime,
 	}
 
+	apiRouter := httpapi.NewRouter(runtime)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/readyz", a.handleReadyz)
+	mux.Handle("/", apiRouter)
 	a.server = &http.Server{
 		Addr:    cfg.HTTPAddr,
 		Handler: mux,
