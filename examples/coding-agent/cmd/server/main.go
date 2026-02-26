@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,20 +12,25 @@ import (
 )
 
 func main() {
+	logger := newServerLogger(serverLogOutput)
+
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		logger.Error("load config", slog.Any("error", err))
+		os.Exit(1)
 	}
 
-	application, err := app.New(cfg)
+	application, err := app.New(cfg, logger)
 	if err != nil {
-		log.Fatalf("new app: %v", err)
+		logger.Error("initialize app", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	serverErrCh := make(chan error, 1)
 	go func() {
 		serverErrCh <- application.Start()
 	}()
+	logger.Info("server started", slog.String("addr", cfg.HTTPAddr))
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -33,20 +38,26 @@ func main() {
 	select {
 	case err := <-serverErrCh:
 		if err != nil {
-			log.Fatalf("server exited: %v", err)
+			logger.Error("server exited", slog.Any("error", err))
+			os.Exit(1)
 		}
 		return
 	case <-sigCtx.Done():
 	}
+	logger.Info("shutdown initiated")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
 	if err := application.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("shutdown server: %v", err)
+		logger.Error("shutdown server", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	if err := <-serverErrCh; err != nil {
-		log.Fatalf("server stopped with error: %v", err)
+		logger.Error("server stopped with error", slog.Any("error", err))
+		os.Exit(1)
 	}
+
+	logger.Info("server stopped")
 }

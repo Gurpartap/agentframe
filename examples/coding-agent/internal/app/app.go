@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 
@@ -21,9 +22,12 @@ type App struct {
 	ready   atomic.Bool
 }
 
-func New(cfg config.Config) (*App, error) {
+func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	if cfg.HTTPAddr == "" {
 		return nil, errors.New("new app: empty HTTPAddr")
+	}
+	if logger == nil {
+		return nil, errors.New("new app: nil logger")
 	}
 	if cfg.ShutdownTimeout <= 0 {
 		return nil, errors.New("new app: shutdown timeout must be > 0")
@@ -47,9 +51,10 @@ func New(cfg config.Config) (*App, error) {
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/readyz", a.handleReadyz)
 	mux.Handle("/", apiRouter)
+	handler := requestLoggingMiddleware(logger)(mux)
 	a.server = &http.Server{
 		Addr:    cfg.HTTPAddr,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	return a, nil
