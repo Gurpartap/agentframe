@@ -619,7 +619,7 @@ func TestToolCallValidation_InvalidShapeFailsRunBeforeExecution(t *testing.T) {
 				t.Fatalf("unexpected tool_result events for invalid tool-call shape")
 			}
 			runFailedEvent := mustSingleRunFailedEvent(t, events.Events())
-			wantDescription := "model error: " + tc.wantError
+			wantDescription := tc.wantError
 			if runFailedEvent.Description != wantDescription {
 				t.Fatalf("unexpected run failed description: got=%q want=%q", runFailedEvent.Description, wantDescription)
 			}

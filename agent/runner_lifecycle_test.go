@@ -580,12 +580,18 @@ func TestRunnerRunContinue_SuspendedResolutionFlow(t *testing.T) {
 				t.Fatalf("transition to running: %v", err)
 			}
 			next.Step++
-			next.PendingRequirement = &agent.PendingRequirement{
+			requirement := &agent.PendingRequirement{
 				ID:     "req-approval",
 				Kind:   agent.RequirementKindApproval,
 				Origin: agent.RequirementOriginModel,
 				Prompt: "approve execution",
 			}
+			next.Messages = append(next.Messages, agent.Message{
+				Role:        agent.RoleAssistant,
+				Content:     "approval required",
+				Requirement: requirement,
+			})
+			next.PendingRequirement = requirement
 			if err := agent.TransitionRunStatus(&next, agent.RunStatusSuspended); err != nil {
 				t.Fatalf("transition to suspended: %v", err)
 			}

@@ -81,6 +81,13 @@ func resolutionMessage(resolution *agent.Resolution) agent.Message {
 	}
 }
 
+func failureEventDescription(runErr error) string {
+	if runErr == nil {
+		return "run failed"
+	}
+	return runErr.Error()
+}
+
 func (l *ReactLoop) Execute(ctx context.Context, state agent.RunState, input agent.EngineInput) (agent.RunState, error) {
 	if ctx == nil {
 		return state, agent.ErrContextNil
@@ -376,7 +383,7 @@ func (l *ReactLoop) failRun(ctx context.Context, state agent.RunState, runErr er
 		RunID:       state.ID,
 		Step:        state.Step,
 		Type:        agent.EventTypeRunFailed,
-		Description: fmt.Sprintf("model error: %v", runErr),
+		Description: failureEventDescription(runErr),
 	}))
 	return state, errors.Join(runErr, eventErr)
 }

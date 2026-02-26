@@ -144,7 +144,86 @@ func validateEngineOutput(prev RunState, next RunState) error {
 			prev.ID,
 		)
 	}
+	if err := validateSuspendedRequirementProvenance(prev, next); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateSuspendedRequirementProvenance(prev RunState, next RunState) error {
+	if next.Status != RunStatusSuspended {
+		return nil
+	}
+	if next.PendingRequirement == nil {
+		return nil
+	}
+
+	additions := next.Messages[len(prev.Messages):]
+	if len(additions) == 0 {
+		return fmt.Errorf(
+			"%w: invariant=suspension_origin_provenance reason=no_message_evidence origin=%s run_id=%q",
+			ErrEngineOutputContractViolation,
+			next.PendingRequirement.Origin,
+			next.ID,
+		)
+	}
+
+	switch next.PendingRequirement.Origin {
+	case RequirementOriginModel:
+		if !hasMatchingAssistantRequirement(additions, next.PendingRequirement) {
+			return fmt.Errorf(
+				"%w: invariant=suspension_origin_provenance reason=missing_assistant_requirement origin=%s requirement_id=%q run_id=%q",
+				ErrEngineOutputContractViolation,
+				next.PendingRequirement.Origin,
+				next.PendingRequirement.ID,
+				next.ID,
+			)
+		}
+	case RequirementOriginTool:
+		if !hasToolObservation(additions) {
+			return fmt.Errorf(
+				"%w: invariant=suspension_origin_provenance reason=missing_tool_observation origin=%s requirement_id=%q run_id=%q",
+				ErrEngineOutputContractViolation,
+				next.PendingRequirement.Origin,
+				next.PendingRequirement.ID,
+				next.ID,
+			)
+		}
+	default:
+		return fmt.Errorf(
+			"%w: invariant=suspension_origin_provenance reason=unknown_origin origin=%q run_id=%q",
+			ErrEngineOutputContractViolation,
+			next.PendingRequirement.Origin,
+			next.ID,
+		)
+	}
+
+	return nil
+}
+
+func hasMatchingAssistantRequirement(messages []Message, requirement *PendingRequirement) bool {
+	for i := len(messages) - 1; i >= 0; i-- {
+		message := messages[i]
+		if message.Role != RoleAssistant || message.Requirement == nil {
+			continue
+		}
+		current := message.Requirement
+		if current.ID == requirement.ID &&
+			current.Kind == requirement.Kind &&
+			current.Origin == requirement.Origin {
+			return true
+		}
+	}
+	return false
+}
+
+func hasToolObservation(messages []Message) bool {
+	for _, message := range messages {
+		if message.Role == RoleTool {
+			return true
+		}
+	}
+	return false
 }
 
 func validateToolDefinitions(command CommandKind, tools []ToolDefinition) error {
