@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policyauth"
 )
 
 type sseFrame struct {
@@ -125,6 +126,7 @@ func TestRunEventsReconnectFromCursor(t *testing.T) {
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(policyauth.HeaderAuthorization, policyauth.BearerPrefix+testAuthToken)
 
 		resp, err := server.Client().Do(req)
 		if err != nil {

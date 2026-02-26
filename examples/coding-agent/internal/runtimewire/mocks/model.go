@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Gurpartap/agentframe/agent"
 	"github.com/Gurpartap/agentframe/agentreact"
@@ -16,7 +17,7 @@ func NewModel() *Model {
 	return &Model{}
 }
 
-func (m *Model) Generate(_ context.Context, request agentreact.ModelRequest) (agent.Message, error) {
+func (m *Model) Generate(ctx context.Context, request agentreact.ModelRequest) (agent.Message, error) {
 	latestUser := latestUserMessage(request.Messages)
 	if request.Resolution == nil && strings.Contains(strings.ToLower(latestUser), "[suspend]") {
 		return agent.Message{
@@ -41,6 +42,15 @@ func (m *Model) Generate(_ context.Context, request agentreact.ModelRequest) (ag
 				},
 			},
 		}, nil
+	}
+	if strings.Contains(strings.ToLower(latestUser), "[sleep]") {
+		timer := time.NewTimer(150 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return agent.Message{}, ctx.Err()
+		case <-timer.C:
+		}
 	}
 
 	return agent.Message{

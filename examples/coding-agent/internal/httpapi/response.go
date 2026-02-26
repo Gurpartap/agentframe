@@ -9,18 +9,22 @@ import (
 	"net/http"
 
 	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policyauth"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policylimit"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runstream"
 )
 
-const maxRequestBodyBytes = 1 << 20
-
 const (
+	errorCodeUnauthorized   = "unauthorized"
+	errorCodePolicyRejected = "policy_rejected"
 	errorCodeInvalidRequest = "invalid_request"
 	errorCodeNotFound       = "not_found"
 	errorCodeConflict       = "conflict"
 	errorCodeForbidden      = "forbidden"
 	errorCodeRuntime        = "runtime_error"
 )
+
+var errInvalidRequest = errors.New("invalid request")
 
 type apiError struct {
 	Code    string `json:"code"`
@@ -72,7 +76,7 @@ func writeMappedError(w http.ResponseWriter, err error) {
 }
 
 func writeInvalidRequest(w http.ResponseWriter, message string) {
-	writeError(w, http.StatusBadRequest, errorCodeInvalidRequest, message)
+	writeMappedError(w, invalidRequestError(message))
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
@@ -92,21 +96,25 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func decodeJSONBody(r *http.Request, dst any) error {
 	if r.Body == nil {
-		return errors.New("request body is required")
+		return invalidRequestError("request body is required")
 	}
 
-	decoder := json.NewDecoder(io.LimitReader(r.Body, maxRequestBodyBytes))
+	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(dst); err != nil {
-		if errors.Is(err, io.EOF) {
-			return errors.New("request body is required")
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return fmt.Errorf("%w: request body exceeds %d bytes", policylimit.ErrRequestTooLarge, maxBytesErr.Limit)
 		}
-		return fmt.Errorf("invalid JSON body: %w", err)
+		if errors.Is(err, io.EOF) {
+			return invalidRequestError("request body is required")
+		}
+		return invalidRequestError(fmt.Sprintf("invalid JSON body: %v", err))
 	}
 
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return errors.New("request body must contain exactly one JSON object")
+		return invalidRequestError("request body must contain exactly one JSON object")
 	}
 
 	return nil
@@ -114,6 +122,16 @@ func decodeJSONBody(r *http.Request, dst any) error {
 
 func mapRuntimeError(err error) (int, string) {
 	switch {
+	case errors.Is(err, policyauth.ErrUnauthorized):
+		return http.StatusUnauthorized, errorCodeUnauthorized
+	case errors.Is(err, policylimit.ErrRequestTooLarge):
+		return http.StatusRequestEntityTooLarge, errorCodePolicyRejected
+	case errors.Is(err, policylimit.ErrRequestTimedOut):
+		return http.StatusRequestTimeout, errorCodePolicyRejected
+	case errors.Is(err, policylimit.ErrCommandBudgetExceeded):
+		return http.StatusTooManyRequests, errorCodePolicyRejected
+	case errors.Is(err, errInvalidRequest):
+		return http.StatusBadRequest, errorCodeInvalidRequest
 	case errors.Is(err, agent.ErrRunNotFound):
 		return http.StatusNotFound, errorCodeNotFound
 	case errors.Is(err, agent.ErrCommandConflict), errors.Is(err, agent.ErrRunVersionConflict):
@@ -134,8 +152,10 @@ func mapRuntimeError(err error) (int, string) {
 		errors.Is(err, agent.ErrToolDefinitionsInvalid),
 		errors.Is(err, agent.ErrContextNil):
 		return http.StatusBadRequest, errorCodeInvalidRequest
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.Canceled):
 		return http.StatusInternalServerError, errorCodeRuntime
+	case errors.Is(err, context.DeadlineExceeded):
+		return http.StatusRequestTimeout, errorCodePolicyRejected
 	default:
 		return http.StatusInternalServerError, errorCodeRuntime
 	}
@@ -143,4 +163,8 @@ func mapRuntimeError(err error) (int, string) {
 
 func isAcceptedRunError(err error) bool {
 	return errors.Is(err, agent.ErrMaxStepsExceeded) && !errors.Is(err, agent.ErrEventPublish)
+}
+
+func invalidRequestError(message string) error {
+	return fmt.Errorf("%w: %s", errInvalidRequest, message)
 }

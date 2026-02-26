@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/Gurpartap/agentframe/agent"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policylimit"
 )
 
 type startRequest struct {
@@ -42,7 +44,7 @@ func (h *handlers) handleRunStart(w http.ResponseWriter, r *http.Request) {
 
 	var request startRequest
 	if err := decodeJSONBody(r, &request); err != nil {
-		writeInvalidRequest(w, err.Error())
+		writeMappedError(w, err)
 		return
 	}
 
@@ -55,9 +57,9 @@ func (h *handlers) handleRunStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxSteps, ok := validateMaxSteps(request.MaxSteps)
-	if !ok {
-		writeInvalidRequest(w, "max_steps must be greater than 0 when provided")
+	maxSteps, err := validateMaxSteps(request.MaxSteps, h.policy.MaxCommandSteps)
+	if err != nil {
+		writeMappedError(w, err)
 		return
 	}
 
@@ -89,13 +91,13 @@ func (h *handlers) handleRunContinue(w http.ResponseWriter, r *http.Request) {
 
 	var request continueRequest
 	if err := decodeJSONBody(r, &request); err != nil {
-		writeInvalidRequest(w, err.Error())
+		writeMappedError(w, err)
 		return
 	}
 
-	maxSteps, ok := validateMaxSteps(request.MaxSteps)
-	if !ok {
-		writeInvalidRequest(w, "max_steps must be greater than 0 when provided")
+	maxSteps, err := validateMaxSteps(request.MaxSteps, h.policy.MaxCommandSteps)
+	if err != nil {
+		writeMappedError(w, err)
 		return
 	}
 
@@ -147,7 +149,7 @@ func (h *handlers) handleRunSteer(w http.ResponseWriter, r *http.Request) {
 
 	var request steerRequest
 	if err := decodeJSONBody(r, &request); err != nil {
-		writeInvalidRequest(w, err.Error())
+		writeMappedError(w, err)
 		return
 	}
 	if strings.TrimSpace(request.Instruction) == "" {
@@ -177,7 +179,7 @@ func (h *handlers) handleRunFollowUp(w http.ResponseWriter, r *http.Request) {
 
 	var request followUpRequest
 	if err := decodeJSONBody(r, &request); err != nil {
-		writeInvalidRequest(w, err.Error())
+		writeMappedError(w, err)
 		return
 	}
 	if strings.TrimSpace(request.Prompt) == "" {
@@ -185,9 +187,9 @@ func (h *handlers) handleRunFollowUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxSteps, ok := validateMaxSteps(request.MaxSteps)
-	if !ok {
-		writeInvalidRequest(w, "max_steps must be greater than 0 when provided")
+	maxSteps, err := validateMaxSteps(request.MaxSteps, h.policy.MaxCommandSteps)
+	if err != nil {
+		writeMappedError(w, err)
 		return
 	}
 
@@ -208,14 +210,15 @@ func (h *handlers) ensureRuntime(w http.ResponseWriter) bool {
 	return true
 }
 
-func validateMaxSteps(input *int) (int, bool) {
-	if input == nil {
-		return 0, true
+func validateMaxSteps(input *int, maxAllowed int) (int, error) {
+	maxSteps, err := policylimit.NormalizeCommandMaxSteps(input, maxAllowed)
+	if err == nil {
+		return maxSteps, nil
 	}
-	if *input <= 0 {
-		return 0, false
+	if errors.Is(err, policylimit.ErrCommandBudgetExceeded) {
+		return 0, err
 	}
-	return *input, true
+	return 0, invalidRequestError(err.Error())
 }
 
 func toResolution(input *resolutionRequest) *agent.Resolution {

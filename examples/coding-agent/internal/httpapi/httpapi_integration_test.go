@@ -6,12 +6,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Gurpartap/agentframe/agent"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/httpapi"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policyauth"
+	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/policylimit"
 	"github.com/Gurpartap/agentframe/examples/coding-agent/internal/runtimewire"
 )
+
+const testAuthToken = "integration-test-token"
 
 type runStateResponse struct {
 	RunID              string `json:"run_id"`
@@ -222,7 +228,170 @@ func TestRunSteerFollowUpAndCancelBehavior(t *testing.T) {
 	}
 }
 
+func TestMutatingRoutesRequireAuth(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	defer server.Close()
+
+	body, err := json.Marshal(map[string]any{
+		"user_prompt": "auth rejection probe",
+		"max_steps":   1,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/runs/start", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do unauthorized request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status mismatch: got=%d want=%d", resp.StatusCode, http.StatusUnauthorized)
+	}
+
+	var rejected errorResponse
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read unauthorized response: %v", err)
+	}
+	if err := json.Unmarshal(responseBody, &rejected); err != nil {
+		t.Fatalf("decode unauthorized response: %v body=%s", err, string(responseBody))
+	}
+	if rejected.Error.Code != "unauthorized" {
+		t.Fatalf("unauthorized code mismatch: got=%q want=%q", rejected.Error.Code, "unauthorized")
+	}
+
+	var accepted runStateResponse
+	status := performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"user_prompt": "auth acceptance probe",
+		"max_steps":   1,
+	}, &accepted)
+	if status != http.StatusOK {
+		t.Fatalf("authorized start status mismatch: got=%d want=%d", status, http.StatusOK)
+	}
+}
+
+func TestPolicyLimitRejections(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithPolicy(t, httpapi.PolicyConfig{
+		AuthToken:           testAuthToken,
+		MaxRequestBodyBytes: 128,
+		RequestTimeout:      30 * time.Millisecond,
+		MaxCommandSteps:     2,
+	})
+	defer server.Close()
+
+	var oversized errorResponse
+	status := performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"user_prompt": strings.Repeat("x", 1024),
+		"max_steps":   1,
+	}, &oversized)
+	if status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized status mismatch: got=%d want=%d", status, http.StatusRequestEntityTooLarge)
+	}
+	if oversized.Error.Code != "policy_rejected" {
+		t.Fatalf("oversized error code mismatch: got=%q want=%q", oversized.Error.Code, "policy_rejected")
+	}
+
+	var budget errorResponse
+	status = performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"user_prompt": "budget cap probe",
+		"max_steps":   3,
+	}, &budget)
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("budget status mismatch: got=%d want=%d", status, http.StatusTooManyRequests)
+	}
+	if budget.Error.Code != "policy_rejected" {
+		t.Fatalf("budget error code mismatch: got=%q want=%q", budget.Error.Code, "policy_rejected")
+	}
+
+	var timedOut errorResponse
+	status = performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"user_prompt": "[sleep] timeout probe",
+		"max_steps":   1,
+	}, &timedOut)
+	if status != http.StatusRequestTimeout {
+		t.Fatalf("timeout status mismatch: got=%d want=%d", status, http.StatusRequestTimeout)
+	}
+	if timedOut.Error.Code != "policy_rejected" {
+		t.Fatalf("timeout error code mismatch: got=%q want=%q", timedOut.Error.Code, "policy_rejected")
+	}
+}
+
+func TestCancellationAndConflictDeterminism(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	defer server.Close()
+
+	const runID = "deterministic-run"
+
+	var initial runStateResponse
+	status := performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"run_id":      runID,
+		"user_prompt": "[loop] deterministic conflict",
+		"max_steps":   1,
+	}, &initial)
+	if status != http.StatusOK {
+		t.Fatalf("initial start status mismatch: got=%d want=%d", status, http.StatusOK)
+	}
+	if initial.Status != string(agent.RunStatusMaxStepsExceeded) {
+		t.Fatalf("initial status mismatch: got=%s want=%s", initial.Status, agent.RunStatusMaxStepsExceeded)
+	}
+
+	var conflict errorResponse
+	status = performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"run_id":      runID,
+		"user_prompt": "second start same id",
+		"max_steps":   1,
+	}, &conflict)
+	if status != http.StatusConflict {
+		t.Fatalf("conflict status mismatch: got=%d want=%d", status, http.StatusConflict)
+	}
+	if conflict.Error.Code != "conflict" {
+		t.Fatalf("conflict code mismatch: got=%q want=%q", conflict.Error.Code, "conflict")
+	}
+
+	var cancelled runStateResponse
+	status = performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/"+runID+"/cancel", map[string]any{}, &cancelled)
+	if status != http.StatusOK {
+		t.Fatalf("cancel status mismatch: got=%d want=%d", status, http.StatusOK)
+	}
+	if cancelled.Status != string(agent.RunStatusCancelled) {
+		t.Fatalf("cancel status mismatch: got=%s want=%s", cancelled.Status, agent.RunStatusCancelled)
+	}
+
+	var repeatCancel errorResponse
+	status = performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/"+runID+"/cancel", map[string]any{}, &repeatCancel)
+	if status != http.StatusForbidden {
+		t.Fatalf("repeat cancel status mismatch: got=%d want=%d", status, http.StatusForbidden)
+	}
+	if repeatCancel.Error.Code != "forbidden" {
+		t.Fatalf("repeat cancel code mismatch: got=%q want=%q", repeatCancel.Error.Code, "forbidden")
+	}
+}
+
 func newTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return newTestServerWithPolicy(t, httpapi.PolicyConfig{
+		AuthToken:           testAuthToken,
+		MaxRequestBodyBytes: 4 << 10,
+		RequestTimeout:      2 * time.Second,
+		MaxCommandSteps:     policylimit.DefaultMaxCommandSteps,
+	})
+}
+
+func newTestServerWithPolicy(t *testing.T, policy httpapi.PolicyConfig) *httptest.Server {
 	t.Helper()
 
 	runtime, err := runtimewire.New()
@@ -230,7 +399,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		t.Fatalf("new runtime: %v", err)
 	}
 
-	return httptest.NewServer(httpapi.NewRouter(runtime))
+	return httptest.NewServer(httpapi.NewRouter(runtime, policy))
 }
 
 func performJSON(t *testing.T, client *http.Client, method, url string, payload any, out any) int {
@@ -248,6 +417,9 @@ func performJSON(t *testing.T, client *http.Client, method, url string, payload 
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
+	}
+	if method == http.MethodPost {
+		req.Header.Set(policyauth.HeaderAuthorization, policyauth.BearerPrefix+testAuthToken)
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
