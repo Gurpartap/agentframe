@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ const (
 	defaultProviderTimeout = 30 * time.Second
 	defaultToolMode        = ToolModeReal
 	defaultBashTimeout     = 3 * time.Second
+	defaultLogLevel        = slog.LevelInfo
 )
 
 type ModelMode string
@@ -37,6 +39,7 @@ const (
 type Config struct {
 	HTTPAddr        string
 	ShutdownTimeout time.Duration
+	LogLevel        slog.Level
 	ModelMode       ModelMode
 	ProviderAPIKey  string
 	ProviderModel   string
@@ -64,6 +67,13 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("parse CODING_AGENT_SHUTDOWN_TIMEOUT: value must be > 0")
 		}
 		cfg.ShutdownTimeout = parsed
+	}
+	if level := strings.TrimSpace(os.Getenv("CODING_AGENT_LOG_LEVEL")); level != "" {
+		parsed, err := parseLogLevel(level)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.LogLevel = parsed
 	}
 
 	if mode := strings.TrimSpace(os.Getenv("CODING_AGENT_MODEL_MODE")); mode != "" {
@@ -121,6 +131,7 @@ func Default() Config {
 	return Config{
 		HTTPAddr:        defaultHTTPAddr,
 		ShutdownTimeout: defaultShutdownTimeout,
+		LogLevel:        defaultLogLevel,
 		ModelMode:       defaultModelMode,
 		ProviderModel:   defaultProviderModel,
 		ProviderBaseURL: defaultProviderBaseURL,
@@ -174,5 +185,40 @@ func (c Config) Validate() error {
 		)
 	}
 
+	switch c.LogLevel {
+	case slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError:
+	default:
+		return fmt.Errorf(
+			"validate config: unsupported CODING_AGENT_LOG_LEVEL %q (allowed: %q, %q, %q, %q)",
+			c.LogLevel.String(),
+			slog.LevelDebug.String(),
+			slog.LevelInfo.String(),
+			slog.LevelWarn.String(),
+			slog.LevelError.String(),
+		)
+	}
+
 	return nil
+}
+
+func parseLogLevel(input string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf(
+			"parse CODING_AGENT_LOG_LEVEL: unsupported value %q (allowed: %q, %q, %q, %q)",
+			input,
+			slog.LevelDebug.String(),
+			slog.LevelInfo.String(),
+			slog.LevelWarn.String(),
+			slog.LevelError.String(),
+		)
+	}
 }

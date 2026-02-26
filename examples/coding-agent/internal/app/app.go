@@ -36,7 +36,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("new app config: %w", err)
 	}
 
-	runtime, err := runtimewire.New(cfg)
+	runtime, err := runtimewire.NewWithLogger(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("new app runtime: %w", err)
 	}

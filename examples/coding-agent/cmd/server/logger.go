@@ -10,9 +10,13 @@ import (
 
 var serverLogOutput io.Writer = os.Stderr
 
-func newServerLogger(output io.Writer) *slog.Logger {
+func newServerLogger(output io.Writer, level slog.Leveler) *slog.Logger {
+	if level == nil {
+		level = slog.LevelInfo
+	}
+
 	handler := tint.NewHandler(output, &tint.Options{
-		Level:      slog.LevelInfo,
+		Level:      level,
 		AddSource:  false,
 		TimeFormat: "2006-01-02 15:04:05.000Z07:00",
 		NoColor:    false,

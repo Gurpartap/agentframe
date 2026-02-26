@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 
@@ -29,6 +30,14 @@ type Runtime struct {
 }
 
 func New(cfg config.Config) (*Runtime, error) {
+	return newRuntime(cfg, nil)
+}
+
+func NewWithLogger(cfg config.Config, logger *slog.Logger) (*Runtime, error) {
+	return newRuntime(cfg, logger)
+}
+
+func newRuntime(cfg config.Config, logger *slog.Logger) (*Runtime, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("new runtime config: %w", err)
 	}
@@ -36,7 +45,8 @@ func New(cfg config.Config) (*Runtime, error) {
 	store := runstoreinmem.New()
 	events := eventinginmem.New()
 	streamBroker := runstream.New(runstream.DefaultHistoryLimit)
-	fanout := newFanoutSink(events, streamBroker)
+	eventLogger := newRuntimeEventLogSink(logger)
+	fanout := newFanoutSink(events, streamBroker, eventLogger)
 
 	model, err := buildModel(cfg)
 	if err != nil {
