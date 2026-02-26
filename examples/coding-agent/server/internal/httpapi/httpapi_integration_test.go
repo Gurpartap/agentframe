@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -421,6 +422,186 @@ func TestRunContinueApprovedToolReplayIsSingleUseAndRequiresNewApproval(t *testi
 	}
 	if resumed.Status != string(agent.RunStatusCompleted) {
 		t.Fatalf("second continue status mismatch: got=%s want=%s", resumed.Status, agent.RunStatusCompleted)
+	}
+}
+
+func TestRunContinueSameCommandIDIsDedupedAcrossConcurrentRequests(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRuntimeConfig(
+		t,
+		httpapi.PolicyConfig{
+			AuthToken:           testAuthToken,
+			MaxRequestBodyBytes: 4 << 10,
+			RequestTimeout:      2 * time.Second,
+			MaxCommandSteps:     policylimit.DefaultMaxCommandSteps,
+		},
+		func(cfg *config.Config) {
+			cfg.ModelMode = config.ModelModeMock
+			cfg.ToolMode = config.ToolModeReal
+			cfg.WorkspaceRoot = t.TempDir()
+		},
+	)
+	defer server.Close()
+
+	var started runStateResponse
+	status := performJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/runs/start", map[string]any{
+		"user_prompt": "[e2e-bash-policy-denied]",
+		"max_steps":   8,
+	}, &started)
+	if status != http.StatusOK {
+		t.Fatalf("start status mismatch: got=%d want=%d", status, http.StatusOK)
+	}
+	if started.Status != string(agent.RunStatusSuspended) {
+		t.Fatalf("expected suspended start status, got=%s", started.Status)
+	}
+	if started.PendingRequirement == nil {
+		t.Fatalf("expected pending requirement for suspended run")
+	}
+
+	continuePayload := map[string]any{
+		"command_id": "continue-dedupe-1",
+		"max_steps":  8,
+		"resolution": map[string]any{
+			"requirement_id": started.PendingRequirement.ID,
+			"kind":           started.PendingRequirement.Kind,
+			"outcome":        "approved",
+		},
+	}
+	encodedPayload, err := json.Marshal(continuePayload)
+	if err != nil {
+		t.Fatalf("marshal continue payload: %v", err)
+	}
+
+	type continueResponse struct {
+		status int
+		body   []byte
+		state  runStateResponse
+		err    error
+	}
+
+	continueURL := server.URL + "/v1/runs/" + started.RunID + "/continue"
+	startSignal := make(chan struct{})
+	results := make(chan continueResponse, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			<-startSignal
+
+			req, reqErr := http.NewRequest(http.MethodPost, continueURL, bytes.NewReader(encodedPayload))
+			if reqErr != nil {
+				results <- continueResponse{err: reqErr}
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set(policyauth.HeaderAuthorization, policyauth.BearerPrefix+testAuthToken)
+
+			resp, doErr := server.Client().Do(req)
+			if doErr != nil {
+				results <- continueResponse{err: doErr}
+				return
+			}
+			defer resp.Body.Close()
+
+			body, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				results <- continueResponse{err: readErr}
+				return
+			}
+
+			result := continueResponse{
+				status: resp.StatusCode,
+				body:   body,
+			}
+			if result.status == http.StatusOK {
+				if unmarshalErr := json.Unmarshal(body, &result.state); unmarshalErr != nil {
+					result.err = unmarshalErr
+				}
+			}
+			results <- result
+		}()
+	}
+
+	close(startSignal)
+	wg.Wait()
+	close(results)
+
+	collected := make([]continueResponse, 0, 2)
+	for result := range results {
+		collected = append(collected, result)
+	}
+	if len(collected) != 2 {
+		t.Fatalf("continue response count mismatch: got=%d want=%d", len(collected), 2)
+	}
+
+	for i := range collected {
+		if collected[i].err != nil {
+			t.Fatalf("continue request %d failed: %v", i, collected[i].err)
+		}
+		if collected[i].status != http.StatusOK {
+			t.Fatalf(
+				"continue request %d status mismatch: got=%d want=%d body=%s",
+				i,
+				collected[i].status,
+				http.StatusOK,
+				string(collected[i].body),
+			)
+		}
+		if collected[i].state.RunID != started.RunID {
+			t.Fatalf("continue request %d run_id mismatch: got=%q want=%q", i, collected[i].state.RunID, started.RunID)
+		}
+		if collected[i].state.Status != string(agent.RunStatusCompleted) {
+			t.Fatalf(
+				"continue request %d status mismatch: got=%s want=%s",
+				i,
+				collected[i].state.Status,
+				agent.RunStatusCompleted,
+			)
+		}
+	}
+
+	if collected[0].state.Step != collected[1].state.Step {
+		t.Fatalf(
+			"deduped continue step mismatch: first=%d second=%d",
+			collected[0].state.Step,
+			collected[1].state.Step,
+		)
+	}
+	if collected[0].state.Version != collected[1].state.Version {
+		t.Fatalf(
+			"deduped continue version mismatch: first=%d second=%d",
+			collected[0].state.Version,
+			collected[1].state.Version,
+		)
+	}
+	if collected[0].state.Output != collected[1].state.Output {
+		t.Fatalf(
+			"deduped continue output mismatch: first=%q second=%q",
+			collected[0].state.Output,
+			collected[1].state.Output,
+		)
+	}
+
+	frames := readNDJSONFrames(
+		t,
+		server.Client(),
+		server.URL+"/v1/runs/"+started.RunID+"/events?cursor=0",
+		11,
+		2*time.Second,
+	)
+	continueAppliedCount := 0
+	for i := range frames {
+		if frames[i].Event.Type != agent.EventTypeCommandApplied {
+			continue
+		}
+		if frames[i].Event.CommandKind == agent.CommandKindContinue {
+			continueAppliedCount++
+		}
+	}
+	if continueAppliedCount != 1 {
+		t.Fatalf("continue command_applied event count mismatch: got=%d want=%d", continueAppliedCount, 1)
 	}
 }
 
